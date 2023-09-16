@@ -50,8 +50,8 @@ class Setup:
 class Observation:
     def __init__(self, num_observations: int, num_laser_ray: int):
         self.laser_data: np.ndarray = np.zeros((num_observations, num_laser_ray), dtype=float) # Matrix of laser data 
-        self.goal_relation: np.ndarray = np.zeros((2, 1), dtype=float).transpose() # 2D vector representing the goal in polar coordinate (distance and angle) with respect to the robot’s current position.
-        self.current_velocity: np.ndarray = np.zeros((2, 1), dtype=float).transpose() # he current linear and angular velocity of the differential-driven robot
+        self.goal_relation: np.ndarray = np.zeros(2, dtype=float) # 2D vector representing the goal in polar coordinate (distance and angle) with respect to the robot’s current position.
+        self.current_velocity: np.ndarray = np.zeros(2, dtype=float) # he current linear and angular velocity of the differential-driven robot
 
     def setLaserObservation(self, laser_vec: np.ndarray):
         '''
@@ -60,10 +60,11 @@ class Observation:
             - laser_vec: Vector of the current laser data
         '''
         # Set the laser data
-        for i in range(self.laser_data.shape[0] - 1, 1, -1):
+        for i in range(self.laser_data.shape[0] - 1, 0, -1):
             self.laser_data[[i, i - 1]] = self.laser_data[[i-1, i]]
         for i in range(laser_vec.size):
             self.laser_data[0, i] = laser_vec[i]
+        print(self.laser_data)
     def setGoalRelationObservation(self, current_pose: np.ndarray, goal_pose: np.ndarray):
         '''
             Set the goal relation observation of the robot
@@ -89,7 +90,7 @@ class Observation:
             ### Parameters
             - current_vel: the current velocity of the robot
         '''
-        self.current_velocity = current_vel
+        self.current_velocity = current_vel.copy()
 class Reward:
     def __init__(self):
         self.r_arrival = 0.0 # reward when robot reach the goal
@@ -98,8 +99,8 @@ class Reward:
         self.omega_w = 0.0 # factor for rotational velocity
         self.large_angular_velocity = 0.0 # angular velocity for punish robot
         self.goal_tolerance = 0.0 # tolerance for goal reach
-        self.prev_pose = np.zeros((3, 1))
-    def calculateReward(self, observation: Observation, current:np.ndarray, goal: np.ndarray, min_distance: float, large_angular_vel: float):
+        self.prev_pose = np.zeros(3)
+    def calculateReward(self, laser_data:np.ndarray, current:np.ndarray, goal: np.ndarray, current_vel: np.ndarray, min_distance: float):
         '''
             observation: observation of robot
             current: current pose of robot
@@ -108,24 +109,29 @@ class Reward:
             large_angular_vel: large angular velocity to punish robot
         '''
         reward = 0.0 # reset reward value
-        # Calculate reward relative to reaching the goal
-        if observation.goal_relation[0] < self.goal_tolerance:
-            reward += self.r_arrival
+        if (self.prev_pose[0] == 0.0 and self.prev_pose[1] == 0.0 and self.prev_pose[2] == 0.0):
+            self.prev_pose = current.copy()
+            return reward
         else:
-            # Calculate the difference distance between two pose
-            diff_distance = calculatedDistance(self.prev_pose[0:2], goal[0:2]) - observation.goal_relation[0]
-            reward += self.omega_g * diff_distance
-        # Update previous robot pose
-        self.prev_pose = current
-        # Calculate reward relative with collision
-        for i in range(observation.laser_data[0, :].size):
-            if observation.laser_data[0, i] < min_distance:
-                reward += self.r_collision
-                break
-        # Calculate reward relative with large rotational velocities
-        if abs(observation.current_velocity[1]) > large_angular_vel:
-            reward += self.omega_w * abs(observation.current_velocity[1])
-            
+            # Calculate reward relative to reaching the goal
+            distance_to_goal = calculatedDistance(current[0:2], goal[0:2])
+
+            if distance_to_goal < self.goal_tolerance:
+                reward = reward + self.r_arrival
+            else:
+                # Calculate the difference distance between two pose
+                diff_distance = calculatedDistance(self.prev_pose[0:2], goal[0:2]) - distance_to_goal
+                reward = reward +  self.omega_g * diff_distance
+            # Calculate reward relative with collision
+            for i in range (laser_data.size):
+                if laser_data[i] < min_distance:
+                    reward = reward + self.r_collision
+                    break
+            # Calculate reward relative with large rotational velocities
+            if abs(current_vel[1]) > self.large_angular_velocity:
+                reward = reward + self.omega_w * abs(current_vel[1])
+            # Update previous robot pose
+            self.prev_pose = current.copy()
         return reward
 
 class PPO:

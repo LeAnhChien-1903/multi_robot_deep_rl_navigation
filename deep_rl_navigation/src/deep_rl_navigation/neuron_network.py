@@ -10,6 +10,8 @@ import torch
 import torch.nn as neurons
 import torchvision 
 
+import random
+
 from deep_rl_navigation.ultis import *
 
 class DeepReinforcementLearningNavigator:
@@ -23,14 +25,14 @@ class DeepReinforcementLearningNavigator:
         self.initializeParameters()
         self.observation = Observation(self.setup_params.num_observations, self.setup_params.num_laser_ray)
         # Robot pose and goal pose
-        self.robot_pose = np.zeros(3).transpose()
-        self.goal_pose = np.zeros(3).transpose()
-        self.current_vel = np.zeros(2).transpose()
+        self.robot_pose = np.zeros(3)
+        self.randomGoalPose()
+        self.current_vel = np.zeros(2)
         # Laser data
         self.laser_data = np.zeros(self.setup_params.num_laser_ray)
         # Initialize publishers and subscribers
         self.initializePublisherAndSubscriber()
-
+        
     def timerCallback(self, event):
         '''
             Timer callback function for implement navigation
@@ -38,7 +40,12 @@ class DeepReinforcementLearningNavigator:
         # Set the current observation
         self.observation.setLaserObservation(self.laser_data)
         self.observation.setCurrentVelocityObservation(self.current_vel)
-
+        self.observation.setGoalRelationObservation(self.robot_pose, self.goal_pose)
+        
+        reward = Float32()
+        reward.data = self.reward.calculateReward(self.laser_data, self.robot_pose, self.goal_pose, self.current_vel, self.setup_params.robot_radius)
+        self.reward_pub.publish(reward)
+        print(reward)
     def initializePublisherAndSubscriber(self):
         '''
             Initialize the publisher and subscriber
@@ -84,6 +91,12 @@ class DeepReinforcementLearningNavigator:
                 range_x = laser_scan.ranges[i] * math.cos(angle) + extra_x
                 range_y = laser_scan.ranges[i] * math.sin(angle) + extra_y
                 self.laser_data[i] = math.hypot(range_x, range_y)
+
+    def randomGoalPose(self):
+        self.goal_pose = np.zeros(3)
+        self.goal_pose[0] = random.uniform(-self.setup_params.map_width/2, self.setup_params.map_width/2)
+        self.goal_pose[1] = random.uniform(-self.setup_params.map_length/2, self.setup_params.map_length/2)
+        self.goal_pose[2] = random.uniform(-math.pi, math.pi)
     def initializeParameters(self):
         '''
             Initialize the parameters from ros param
@@ -115,7 +128,7 @@ class DeepReinforcementLearningNavigator:
         self.setup_params.map_length = rospy.get_param("/map_length")
         self.setup_params.map_width = rospy.get_param("/map_width")
         
-        self.setup_params.robot_radius = math.hypot(self.setup_params.robot_width/2, self.setup_params.robot_length/2)
+        self.setup_params.robot_radius = math.hypot(self.setup_params.robot_width/2, self.setup_params.robot_length/2) + 0.05
         # Reward parameters
         self.reward.r_arrival = rospy.get_param("/reward/r_arrival")
         self.reward.r_collision = rospy.get_param("/reward/r_collision")
