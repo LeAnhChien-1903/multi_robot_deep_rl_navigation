@@ -49,9 +49,9 @@ class Setup:
 
 class Observation:
     def __init__(self, num_observations: int, num_laser_ray: int):
-        self.laser_data: np.ndarray = np.zeros((num_observations, num_laser_ray), dtype=float) # Matrix of laser data 
-        self.goal_relation: np.ndarray = np.zeros(2, dtype=float) # 2D vector representing the goal in polar coordinate (distance and angle) with respect to the robot’s current position.
-        self.current_velocity: np.ndarray = np.zeros(2, dtype=float) # he current linear and angular velocity of the differential-driven robot
+        self.laser_data: np.ndarray = np.zeros((num_observations, num_laser_ray), np.float32) # Matrix of laser data 
+        self.goal_relation: np.ndarray = np.zeros(2, np.float32) # 2D vector representing the goal in polar coordinate (distance and angle) with respect to the robot’s current position.
+        self.current_velocity: np.ndarray = np.zeros(2, np.float32) # he current linear and angular velocity of the differential-driven robot
 
     def setLaserObservation(self, laser_vec: np.ndarray):
         '''
@@ -64,7 +64,6 @@ class Observation:
             self.laser_data[[i, i - 1]] = self.laser_data[[i-1, i]]
         for i in range(laser_vec.size):
             self.laser_data[0, i] = laser_vec[i]
-        print(self.laser_data)
     def setGoalRelationObservation(self, current_pose: np.ndarray, goal_pose: np.ndarray):
         '''
             Set the goal relation observation of the robot
@@ -99,7 +98,7 @@ class Reward:
         self.omega_w = 0.0 # factor for rotational velocity
         self.large_angular_velocity = 0.0 # angular velocity for punish robot
         self.goal_tolerance = 0.0 # tolerance for goal reach
-        self.prev_pose = np.zeros(3)
+        self.prev_pose = np.zeros(3, dtype=np.float32)
     def calculateReward(self, laser_data:np.ndarray, current:np.ndarray, goal: np.ndarray, current_vel: np.ndarray, min_distance: float):
         '''
             observation: observation of robot

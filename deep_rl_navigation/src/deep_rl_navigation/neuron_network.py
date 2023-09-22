@@ -25,11 +25,13 @@ class DeepReinforcementLearningNavigator:
         self.initializeParameters()
         self.observation = Observation(self.setup_params.num_observations, self.setup_params.num_laser_ray)
         # Robot pose and goal pose
-        self.robot_pose = np.zeros(3)
+        self.robot_pose = np.zeros(3, dtype=np.float32)
         self.randomGoalPose()
-        self.current_vel = np.zeros(2)
+        self.current_vel = np.zeros(2, dtype=np.float32)
         # Laser data
-        self.laser_data = np.zeros(self.setup_params.num_laser_ray)
+        self.laser_data = np.zeros(self.setup_params.num_laser_ray, dtype=np.float32)
+        # Initialize hidden layers of network
+        self.initializeHiddenLayers()
         # Initialize publishers and subscribers
         self.initializePublisherAndSubscriber()
         
@@ -45,7 +47,49 @@ class DeepReinforcementLearningNavigator:
         reward = Float32()
         reward.data = self.reward.calculateReward(self.laser_data, self.robot_pose, self.goal_pose, self.current_vel, self.setup_params.robot_radius)
         self.reward_pub.publish(reward)
-        print(reward)
+        
+        # Reshape the observation laser data
+        output = self.forwardCalculation()
+        cmd_vel = Twist()
+        cmd_vel.linear.x = output[0]
+        cmd_vel.angular.z = output[1]
+        self.cmd_vel_pub.publish(cmd_vel)
+    
+    def forwardCalculation(self):
+        # Reshape the observation
+        laser_observation = torch.from_numpy(self.observation.laser_data.reshape((1, 3, 541)))
+        goal_relation_observation = torch.from_numpy(self.observation.goal_relation)
+        velocity_observation = torch.from_numpy(self.observation.current_velocity)
+        # Forward with laser data
+        observation_output = self.relu(self.conv1(laser_observation))
+        observation_output = self.relu(self.conv2(observation_output))
+        observation_output = self.flat(observation_output)
+        observation_output = self.relu(self.fully1(observation_output))
+        # # Forward with goal relation and current velocity and output of three network
+        observation_output = torch.cat((observation_output, goal_relation_observation, velocity_observation))
+        observation_output = self.relu(self.fully2(observation_output))
+        observation_output = self.fully3(observation_output)
+        
+        linear_output: torch.Tensor = self.sigmoid(observation_output[0])
+        angular_output: torch.Tensor = self.tanh(observation_output[1])
+        
+        network_output = np.array([linear_output.item(), angular_output.item()])
+        return network_output
+    
+    def initializeHiddenLayers(self):
+        '''
+            Initialize two convolution layers and three fully connected layers and ReLU
+        '''
+        self.conv1 = neurons.Conv1d(in_channels= 3, out_channels= 32, kernel_size= 5, stride= 2)
+        self.conv2 = neurons.Conv1d(in_channels= 32, out_channels= 32, kernel_size= 3, stride= 2)
+        self.flat = neurons.Flatten(0, -1)
+        self.fully1 = neurons.Linear(in_features= 4288, out_features= 256)
+        self.fully2 = neurons.Linear(in_features= 260, out_features= 128)
+        self.fully3 = neurons.Linear(in_features= 128, out_features= 2)
+        self.relu = neurons.LeakyReLU()
+        self.sigmoid = neurons.Sigmoid()
+        self.tanh = neurons.Tanh()
+        
     def initializePublisherAndSubscriber(self):
         '''
             Initialize the publisher and subscriber
@@ -93,7 +137,7 @@ class DeepReinforcementLearningNavigator:
                 self.laser_data[i] = math.hypot(range_x, range_y)
 
     def randomGoalPose(self):
-        self.goal_pose = np.zeros(3)
+        self.goal_pose = np.zeros(3, dtype=np.float32)
         self.goal_pose[0] = random.uniform(-self.setup_params.map_width/2, self.setup_params.map_width/2)
         self.goal_pose[1] = random.uniform(-self.setup_params.map_length/2, self.setup_params.map_length/2)
         self.goal_pose[2] = random.uniform(-math.pi, math.pi)

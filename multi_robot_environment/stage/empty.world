@@ -22,12 +22,12 @@ scale 40.000000
 show_data 0
 show_grid 1
 )
-floor
-(
-name "empty"
-bitmap "../maps/empty.png"
-size [30.000000 30.000000 2.000000]
-)
+#floor
+#(
+#name "empty"
+#bitmap "../maps/empty.png"
+#size [30.000000 30.000000 2.000000]
+#)
 define robot robot_base
 (
 sick_laser(pose [0.400000 0.000000 -0.200000 0.000000])
