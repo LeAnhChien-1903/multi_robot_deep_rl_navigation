@@ -2,6 +2,7 @@
 
 import numpy as np
 import math
+import torch
 
 def normalize_angle(angle: float):
     '''
@@ -90,6 +91,11 @@ class Observation:
             - current_vel: the current velocity of the robot
         '''
         self.current_velocity = current_vel.copy()
+    def setObservation(self, laser_vec: np.ndarray, current_pose: np.ndarray, goal_pose: np.ndarray, current_vel: np.ndarray):
+        self.setLaserObservation(laser_vec)
+        self.setGoalRelationObservation(current_pose, goal_pose)
+        self.setCurrentVelocityObservation(current_vel)
+
 class Reward:
     def __init__(self):
         self.r_arrival = 0.0 # reward when robot reach the goal

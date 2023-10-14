@@ -47,3 +47,6 @@ hybrid:
   r_risk: 0.8
   p_scale: 1.25
   v_max: 0.5
+
+actor_parameters_path: "/home/leanhchien/deep_rl_ws/src/multi_robot_deep_rl_navigation/deep_rl_navigation/parameters/actor_parameters.pt"
+critic_parameters_path: "/home/leanhchien/deep_rl_ws/src/multi_robot_deep_rl_navigation/deep_rl_navigation/parameters/critic_parameters.pt"
