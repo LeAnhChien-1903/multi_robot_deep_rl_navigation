@@ -5,11 +5,11 @@
     <rosparam command="load" file="$(find deep_rl_navigation)/config/deep_rl_navigation_params.yaml"/>
     <!-- Multi robot navigation  -->
     <node pkg="deep_rl_navigation" type="main.py" name="robot_0"  output="screen"/>
-    <!-- <node pkg="deep_rl_navigation" type="main.py" name="robot_1"  output="screen"/>
+    <node pkg="deep_rl_navigation" type="main.py" name="robot_1"  output="screen"/>
     <node pkg="deep_rl_navigation" type="main.py" name="robot_2"  output="screen"/>
     <node pkg="deep_rl_navigation" type="main.py" name="robot_3"  output="screen"/>
     <node pkg="deep_rl_navigation" type="main.py" name="robot_4"  output="screen"/>
-    <node pkg="deep_rl_navigation" type="main.py" name="robot_5"  output="screen"/>
+    <!-- <node pkg="deep_rl_navigation" type="main.py" name="robot_5"  output="screen"/>
     <node pkg="deep_rl_navigation" type="main.py" name="robot_6"  output="screen"/>
     <node pkg="deep_rl_navigation" type="main.py" name="robot_7"  output="screen"/>
     <node pkg="deep_rl_navigation" type="main.py" name="robot_8"  output="screen"/>

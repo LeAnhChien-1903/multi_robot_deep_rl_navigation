@@ -31,7 +31,7 @@ int main(int argc, char** argv)
     node.getParam("laser_pose", laser_pose);
     node.getParam("number_of_robots", number_of_robots);
     // Create a world file
-    std::ofstream world_file("/home/leanhchien/deep_rl_ws/src/multi_robot_environment/stage/" + map_name + ".world");
+    std::ofstream world_file("/home/leanhchien/deep_rl_ws/src/multi_robot_deep_rl_navigation/multi_robot_environment/stage/" + map_name + ".world");
     // Write header settings
     std::string header_settings = "include \"robot.inc\"\n"
                         "include \"sick.inc\"\n"

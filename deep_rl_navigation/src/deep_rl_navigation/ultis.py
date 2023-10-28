@@ -95,15 +95,25 @@ class Observation:
         self.setLaserObservation(laser_vec)
         self.setGoalRelationObservation(current_pose, goal_pose)
         self.setCurrentVelocityObservation(current_vel)
+        self.normalizeObservation()
+    
+    def normalizeObservation(self):
+        observation = np.concatenate((self.laser_data.flatten(), self.goal_relation))
+        mean = observation.mean()
+        std_deviation = observation.std()
+        
+        self.laser_data = (self.laser_data - mean) / std_deviation
+        self.goal_relation = (self.goal_relation - mean) / std_deviation
+        # velocity_data = (velocity_data - mean) / std_deviation
 
 class Reward:
     def __init__(self):
-        self.r_arrival = 0.0 # reward when robot reach the goal
-        self.r_collision = 0.0 # reward when robot colliding with obstacle
-        self.omega_g = 0.0 # factor for goal reward
-        self.omega_w = 0.0 # factor for rotational velocity
-        self.large_angular_velocity = 0.0 # angular velocity for punish robot
-        self.goal_tolerance = 0.0 # tolerance for goal reach
+        self.r_arrival: float = 15.0 # reward when robot reach the goal
+        self.r_collision: float = -15.0 # reward when robot colliding with obstacle
+        self.omega_g: float = 2.5 # factor for goal reward
+        self.omega_w: float = - 0.1 # factor for rotational velocity
+        self.large_angular_velocity: float = 0.7 # angular velocity for punish robot
+        self.goal_tolerance: float = 0.1 # tolerance for goal reach
         self.prev_pose = np.zeros(3, dtype=np.float32)
     def calculateReward(self, laser_data:np.ndarray, current:np.ndarray, goal: np.ndarray, current_vel: np.ndarray, min_distance: float):
         '''
@@ -113,51 +123,49 @@ class Reward:
             min_distance: minimum distance that robot collides with other objects
             large_angular_vel: large angular velocity to punish robot
         '''
-        reward = 0.0 # reset reward value
+        r_g = r_c = r_w = 0.0 
         if (self.prev_pose[0] == 0.0 and self.prev_pose[1] == 0.0 and self.prev_pose[2] == 0.0):
             self.prev_pose = current.copy()
-            return reward
+            return r_g + r_c + r_w
         else:
             # Calculate reward relative to reaching the goal
             distance_to_goal = calculatedDistance(current[0:2], goal[0:2])
 
             if distance_to_goal < self.goal_tolerance:
-                reward = reward + self.r_arrival
+                r_g = self.r_arrival
             else:
                 # Calculate the difference distance between two pose
                 diff_distance = calculatedDistance(self.prev_pose[0:2], goal[0:2]) - distance_to_goal
-                reward = reward +  self.omega_g * diff_distance
+                r_g = self.omega_g * diff_distance
             # Calculate reward relative with collision
-            for i in range (laser_data.size):
-                if laser_data[i] < min_distance:
-                    reward = reward + self.r_collision
-                    break
+            if min(laser_data) < min_distance:
+                r_c = self.r_collision
             # Calculate reward relative with large rotational velocities
             if abs(current_vel[1]) > self.large_angular_velocity:
-                reward = reward + self.omega_w * abs(current_vel[1])
+                r_w = self.omega_w * abs(current_vel[1])
             # Update previous robot pose
             self.prev_pose = current.copy()
-        return reward
+        return r_g + r_c + r_w
 
 class PPO:
     '''
         Hyperparameters of PPO algorithm
     '''
     def __init__(self):
-        self.lambda_: float = 0.0
-        self.gamma: float = 0.0
-        self.T_max: int = 0
-        self.E_phi: int = 0
-        self.beta: float = 0.0
-        self.KL_target: float= 0.0
-        self.xi: float = 0.0
-        self.lr_theta_1st: float = 0.0
-        self.lr_theta_2nd: float = 0.0
-        self.E_v: int = 0
-        self.lr_phi: float = 0.0
-        self.beta_high: float = 0.0
-        self.alpha: float = 0.0
-        self.beta_low: float = 0.0
+        self.lambda_: float = 0.95
+        self.gamma: float = 0.99
+        self.T_max: int = 2000
+        self.E_phi: int = 20
+        self.beta: float = 1.0
+        self.KL_target: float= 0.0015
+        self.xi: float = 50.0
+        self.lr_theta_1st: float = 0.00005
+        self.lr_theta_2nd: float = 0.00002
+        self.E_v: int = 10
+        self.lr_phi: float = 0.001
+        self.beta_high: float = 2.0
+        self.alpha: float = 1.5
+        self.beta_low: float = 0.5
 
 class Hybrid:
     '''

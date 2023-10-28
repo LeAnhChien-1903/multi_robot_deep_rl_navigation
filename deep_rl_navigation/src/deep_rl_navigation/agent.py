@@ -5,6 +5,7 @@ from tf.transformations import euler_from_quaternion
 
 import numpy as np
 import math
+import os
 
 import torch
 import random
@@ -22,8 +23,6 @@ from deep_rl_navigation.actor_critic import *
 random.seed(1)
 np.random.seed(1)
 torch.manual_seed(1)
-torch.backends.cudnn.deterministic = True
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 class Agent:
     def __init__(self, name: str):
@@ -42,32 +41,83 @@ class Agent:
         self.current_vel = np.zeros(2, dtype=np.float32)
         # Laser data
         self.laser_data = np.zeros(self.setup_params.num_laser_ray, dtype=np.float32)
-        # Actor 
-        self.actor = Actor(self.actor_parameters_path).to(device)
-        # Critic
-        self.critic = Critic(self.critic_parameters_path).to(device)
+        # Actor and Critic
+        self.actor_critic = ActorCritic(self.parameters_path)
+        # Step initialization
+        self.step: int = 0
+        # Initialize the storage
+        self.initializeStorage()
+        self.folder_name = "/home/leanhchien/deep_rl_ws/src/multi_robot_deep_rl_navigation/deep_rl_navigation/data" + self.robot_name
+        if not os.path.exists(self.folder_name):
+            os.mkdir(self.folder_name)
         # Initialize Publisher and Subscriber
         self.initializePublisherAndSubscriber()
-    
+
     def timerCallback(self, event):
         '''
             Timer callback function for implement navigation
         '''
-        # Set the current observation
-        self.observation.setObservation(self.laser_data, self.robot_pose, self.goal_pose, self.current_vel)
+        if self.step < self.time_step_size:
+            if (self.robot_name == "/robot_0"):
+                print(self.step)
+            done = self.goalReached()
+            # Set the current observation
+            self.observation.setObservation(self.laser_data, self.robot_pose, self.goal_pose, self.current_vel)
+            laser_obs, goal_obs, vel_obs = self.transformObservation()
+            
+            # Get the reward
+            reward = self.reward.calculateReward(self.laser_data, self.robot_pose, self.goal_pose, self.current_vel, self.setup_params.robot_radius)
+            self.reward_storage[self.step] = torch.tensor(reward)
+            # Store the current observation
+            self.laser_obs_storage[self.step] = laser_obs
+            self.goal_obs_storage[self.step] = goal_obs
+            self.vel_obs_storage[self.step] = vel_obs
+            
+            # Get action and value function
+            action, value, log_prob, entropy = self.actor_critic.get_action_and_value(laser_obs, goal_obs, vel_obs)
+            self.action_storage[self.step] = action
+            self.log_prob_storage[self.step] = log_prob
+            self.entropy_storage[self.step] = entropy
+            self.value_storage[self.step] = value
+            self.done_storage[self.step] = torch.tensor(done)
+            
+            reward_msg = Float32()
+            reward_msg.data = reward
+            self.reward_pub.publish(reward_msg)
+            
+            cmd_vel = Twist()
+            cmd_vel.linear.x = action.numpy()[0]
+            cmd_vel.angular.z = action.numpy()[1]
+            self.cmd_vel_pub.publish(cmd_vel)
+            self.step += 1
+        else:
+            cmd_vel = Twist()
+            self.cmd_vel_pub.publish(cmd_vel)
+            # Store the data to files
+            torch.save(self.laser_obs_storage, self.folder_name + "/" + "laser_obs.pt")
+            torch.save(self.goal_obs_storage, self.folder_name + "/" + "goal_obs.pt")
+            torch.save(self.vel_obs_storage, self.folder_name + "/" + "vel_obs.pt")
+            torch.save(self.reward_storage, self.folder_name + "/" + "reward.pt")
+            torch.save(self.action_storage, self.folder_name + "/" + "actions.pt")
+            torch.save(self.log_prob_storage, self.folder_name + "/" + "log_prob.pt")
+            torch.save(self.value_storage, self.folder_name + "/" + "value.pt")
+            torch.save(self.done_storage, self.folder_name + "/" + "done.pt")
+            torch.save(self.entropy_storage, self.folder_name + "/" + "entropy.pt")
+
+    def initializeStorage(self):
+        """
+            Setup the storage for observation, action, log probability, reward, value, done state
+        """
+        self.laser_obs_storage = torch.zeros((self.time_step_size, 1, self.setup_params.num_observations, self.setup_params.num_laser_ray))
+        self.goal_obs_storage = torch.zeros((self.time_step_size, 2))
+        self.vel_obs_storage = torch.zeros((self.time_step_size, 2))
+        self.action_storage = torch.zeros((self.time_step_size, 2))
+        self.log_prob_storage = torch.zeros(self.time_step_size)
+        self.reward_storage = torch.zeros(self.time_step_size)
+        self.value_storage = torch.zeros(self.time_step_size)
+        self.done_storage = torch.zeros(self.time_step_size)
+        self.entropy_storage = torch.zeros(self.time_step_size)
         
-        reward = Float32()
-        reward.data = self.reward.calculateReward(self.laser_data, self.robot_pose, self.goal_pose, self.current_vel, self.setup_params.robot_radius)
-        self.reward_pub.publish(reward)
-        
-        # Reshape the observation
-        laser_obs, goal_obs, vel_obs = self.transformObservationCPUToGPU()
-        action, _, _ = self.actor.get_action(laser_obs, goal_obs, vel_obs, device)
-        cmd_vel = Twist()
-        cmd_vel.linear.x = action.cpu().numpy()[0][0]
-        cmd_vel.angular.z = action.cpu().numpy()[0][1]
-        self.cmd_vel_pub.publish(cmd_vel)
-    
     def initializePublisherAndSubscriber(self):
         '''
             Initialize the publisher and subscriber
@@ -113,18 +163,26 @@ class Agent:
                 range_y = laser_scan.ranges[i] * math.sin(angle) + extra_y
                 self.laser_data[i] = math.hypot(range_x, range_y)
 
-    def transformObservationCPUToGPU(self):
-        laser_obs = torch.from_numpy(self.observation.laser_data.reshape((1, self.setup_params.num_observations, self.setup_params.num_laser_ray))).to(device)
-        goal_obs = torch.from_numpy(self.observation.goal_relation).to(device)
-        vel_obs = torch.from_numpy(self.observation.current_velocity).to(device)
+    def transformObservation(self):
+        
+        laser_obs = torch.from_numpy(self.observation.laser_data.reshape((1, self.setup_params.num_observations, self.setup_params.num_laser_ray)))
+        goal_obs = torch.from_numpy(self.observation.goal_relation)
+        vel_obs = torch.from_numpy(self.observation.current_velocity)
         
         return laser_obs, goal_obs, vel_obs
+    
+    def goalReached(self):
+        distance = calculatedDistance(self.robot_pose[0:2], self.goal_pose[0:2])
+        if distance < self.setup_params.goal_tolerance:
+            return True
+        
+        return False
     
     def randomPose(self):        
         return np.array([random.uniform(-self.setup_params.map_width/2, self.setup_params.map_width/2), 
                             random.uniform(-self.setup_params.map_length/2, self.setup_params.map_length/2),
                             random.uniform(-math.pi, math.pi)])
-
+        
     def initializeParameters(self):
         '''
             Initialize the parameters from ros param
@@ -187,5 +245,7 @@ class Agent:
         self.hybrid_params.v_max = rospy.get_param("/hybrid/v_max")
         
         # Path to save parameters
-        self.actor_parameters_path = rospy.get_param("/actor_parameters_path")
-        self.critic_parameters_path = rospy.get_param("/critic_parameters_path")
+        self.parameters_path = rospy.get_param("/parameters_path")
+        self.number_of_robot = rospy.get_param("/number_of_robot")
+        
+        self.time_step_size = math.ceil(self.ppo_params.T_max / self.number_of_robot)

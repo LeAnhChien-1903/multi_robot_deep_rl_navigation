@@ -13,8 +13,8 @@ robot_length: 0.9 # m
 lidar_x: 0.4
 lidar_y: 0.0
 lidar_theta: 0.0
-map_length: 25.0
-map_width: 25.0
+map_length: 10.0
+map_width: 10.0
 num_observations: 3
 num_laser_ray: 541
 goal_tolerance: 0.1
@@ -29,7 +29,7 @@ reward:
 ppo:
   lambda: 0.95
   gamma: 0.99
-  T_max: 8000
+  T_max: 2000
   E_phi: 20
   beta: 1.0
   KL_target: 0.0015
@@ -48,5 +48,7 @@ hybrid:
   p_scale: 1.25
   v_max: 0.5
 
-actor_parameters_path: "/home/leanhchien/deep_rl_ws/src/multi_robot_deep_rl_navigation/deep_rl_navigation/parameters/actor_parameters.pt"
-critic_parameters_path: "/home/leanhchien/deep_rl_ws/src/multi_robot_deep_rl_navigation/deep_rl_navigation/parameters/critic_parameters.pt"
+parameters_path: "/home/leanhchien/deep_rl_ws/src/multi_robot_deep_rl_navigation/deep_rl_navigation/policy_parameters/parameters.pt"
+actor_parameters_path: "/home/leanhchien/deep_rl_ws/src/multi_robot_deep_rl_navigation/deep_rl_navigation/policy_parameters/actor_parameters.pt"
+critic_parameters_path: "/home/leanhchien/deep_rl_ws/src/multi_robot_deep_rl_navigation/deep_rl_navigation/policy_parameters/critic_parameters.pt"
+number_of_robot: 5

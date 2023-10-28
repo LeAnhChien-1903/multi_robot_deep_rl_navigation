@@ -1,5 +1,5 @@
 # Parameters of stage window
-window_size: [1000.0, 1000.0]
+window_size: [400.0, 400.0]
 window_center: [0.0, 0.0]
 window_rotate: [0.0, 0.0]
 window_scale: 40.0
@@ -7,7 +7,7 @@ show_data: false
 show_grid: true
 # Floor plan
 map_name: empty
-floor_size: [30.0, 30.0, 2.0]
+floor_size: [10.0, 10.0, 2.0]
 # Robot
 laser_pose: [0.4, 0.0, -0.2, 0.0]
-number_of_robots: 20
+number_of_robots: 5
