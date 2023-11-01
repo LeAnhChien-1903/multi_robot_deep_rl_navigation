@@ -29,7 +29,7 @@ reward:
 ppo:
   lambda: 0.95
   gamma: 0.99
-  T_max: 2000
+  T_max: 1000
   E_phi: 20
   beta: 1.0
   KL_target: 0.0015
@@ -48,7 +48,5 @@ hybrid:
   p_scale: 1.25
   v_max: 0.5
 
-parameters_path: "/home/leanhchien/deep_rl_ws/src/multi_robot_deep_rl_navigation/deep_rl_navigation/policy_parameters/parameters.pt"
-actor_parameters_path: "/home/leanhchien/deep_rl_ws/src/multi_robot_deep_rl_navigation/deep_rl_navigation/policy_parameters/actor_parameters.pt"
-critic_parameters_path: "/home/leanhchien/deep_rl_ws/src/multi_robot_deep_rl_navigation/deep_rl_navigation/policy_parameters/critic_parameters.pt"
 number_of_robot: 5
+number_of_action: 21

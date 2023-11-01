@@ -18,7 +18,19 @@ def calculatedDistance(point1: np.ndarray, point2: np.ndarray):
         - point2: the coordinate of second point
     '''
     return math.sqrt(np.sum(np.square(point1 - point2)))
-    
+
+def calculateMultiKLDivergence(p1: torch.Tensor, p2: torch.Tensor, q1: torch.Tensor, q2: torch.Tensor)-> torch.Tensor:
+    # Calculate the probability list
+    p:torch.Tensor = torch.zeros(p1.shape[0] * p2.shape[0])
+    q:torch.Tensor = torch.zeros(q2.shape[0] * q1.shape[0])
+    counter = 0
+    for i in range(p1.shape[0]):
+        for j in range(p2.shape[0]):
+            p[counter] = p1[i] * p2[j]
+            q[counter] = q1[i] * p2[j]
+            counter += 1
+
+    return torch.sum(p * (p/q).log())
 class Setup:
     def __init__(self):
         # Time constraint
@@ -154,7 +166,7 @@ class PPO:
     def __init__(self):
         self.lambda_: float = 0.95
         self.gamma: float = 0.99
-        self.T_max: int = 2000
+        self.T_max: int = 1000
         self.E_phi: int = 20
         self.beta: float = 1.0
         self.KL_target: float= 0.0015
