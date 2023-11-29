@@ -10,7 +10,9 @@ project(multi_robot_environment)
 find_package(catkin REQUIRED COMPONENTS
   roscpp
   stage_ros
+  
 )
+find_package(Eigen3 REQUIRED)
 
 catkin_package(
 #  INCLUDE_DIRS include
@@ -27,6 +29,7 @@ catkin_package(
 ## Your package locations should be listed before other locations
 include_directories(
 # include
+  ${EIGEN3_INCLUDE_DIRS}
   ${catkin_INCLUDE_DIRS}
   stage
 )

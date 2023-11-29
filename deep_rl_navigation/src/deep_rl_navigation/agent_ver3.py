@@ -52,10 +52,10 @@ class Agent:
             print("Load actor model!")
         self.critic = CriticDiscrete(num_input_channels= self.setup_params.num_observations)
         if not os.path.exists(os.path.join(parameter_path, "critic_{}_{}_parameters.pt".format(self.setup_params.num_observations, self.setup_params.num_laser_ray))):
-            torch.save(self.actor.state_dict(), os.path.join(parameter_path, "critic_{}_{}_parameters.pt".format(self.setup_params.num_observations, self.setup_params.num_laser_ray)))
+            torch.save(self.critic.state_dict(), os.path.join(parameter_path, "critic_{}_{}_parameters.pt".format(self.setup_params.num_observations, self.setup_params.num_laser_ray)))
             print("Save initialized critic model!")
         else:
-            self.actor.load_state_dict(torch.load(os.path.join(parameter_path, "critic_{}_{}_parameters.pt".format(self.setup_params.num_observations, self.setup_params.num_laser_ray)), map_location= 'cpu'))
+            self.critic.load_state_dict(torch.load(os.path.join(parameter_path, "critic_{}_{}_parameters.pt".format(self.setup_params.num_observations, self.setup_params.num_laser_ray)), map_location= 'cpu'))
             print("Load critic model!")
             
         # Step initialization
@@ -71,7 +71,7 @@ class Agent:
         '''
             Timer callback function for implement navigation
         '''
-        if self.step < self.time_step_size:
+        if self.step <= self.time_step_size:
             if (self.robot_name == "/robot_0"):
                 print(self.step + 1)
             done = self.goalReached()
@@ -81,30 +81,36 @@ class Agent:
             
             # Get the reward
             reward = self.reward.calculateReward(self.laser_data, self.robot_pose, self.goal_pose, self.current_vel, self.setup_params.robot_radius)
-            # Store the current observation
-            self.laser_obs_batch[self.step] = laser_obs
-            self.goal_obs_batch[self.step] = goal_obs
-            self.vel_obs_batch[self.step] = vel_obs
-            self.reward_batch[self.step] = torch.tensor(reward)
-            
             # Get action and value function
             linear_vel, angular_vel, action_log_prob, linear_probs, angular_probs = self.actor.get_action(laser_obs, goal_obs, vel_obs)
             value = self.critic.get_value(laser_obs, goal_obs, vel_obs)
-            self.linear_vel_batch[self.step] = linear_vel
-            self.angular_vel_batch[self.step] = angular_vel
-            self.log_prob_batch[self.step] = action_log_prob
-            self.linear_probs_batch[self.step] = linear_probs
-            self.angular_probs_batch[self.step] = angular_probs
+            
             self.value_batch[self.step] = value
-            self.done_batch[self.step] = torch.tensor(done)
+            
+            if self.step > 0:
+                self.reward_batch[self.step - 1] = reward
+                self.done_batch[self.step - 1] = done
+                
+            if self.step < self.time_step_size:
+                # Store the current observation
+                self.laser_obs_batch[self.step] = laser_obs
+                self.goal_obs_batch[self.step] = goal_obs
+                self.vel_obs_batch[self.step] = vel_obs
+                
+                self.linear_vel_batch[self.step] = linear_vel
+                self.angular_vel_batch[self.step] = angular_vel
+                self.linear_probs_batch[self.step] = linear_probs
+                self.angular_probs_batch[self.step] = angular_probs
+                
+                self.log_prob_batch[self.step] = action_log_prob
             
             reward_msg = Float32()
             reward_msg.data = reward
             self.reward_pub.publish(reward_msg)
             
             cmd_vel = Twist()
-            cmd_vel.linear.x = self.linear_vel_vector[linear_vel.numpy()]
-            cmd_vel.angular.z = self.angular_vel_vector[angular_vel.numpy()]
+            cmd_vel.linear.x = self.linear_vel_vector[linear_vel.item()]
+            cmd_vel.angular.z = self.angular_vel_vector[angular_vel.item()]
             self.cmd_vel_pub.publish(cmd_vel)
             self.step += 1
         else:
@@ -135,9 +141,8 @@ class Agent:
         self.angular_probs_batch = torch.zeros((self.time_step_size, self.number_of_action))
         self.log_prob_batch = torch.zeros(self.time_step_size)
         self.reward_batch = torch.zeros(self.time_step_size)
-        self.value_batch = torch.zeros(self.time_step_size)
+        self.value_batch = torch.zeros(self.time_step_size+1)
         self.done_batch = torch.zeros(self.time_step_size)
-        
         
     def initializePublisherAndSubscriber(self):
         '''
@@ -268,4 +273,4 @@ class Agent:
         self.number_of_robot = rospy.get_param("/number_of_robot")
         self.number_of_action = rospy.get_param("/number_of_action")
         
-        self.time_step_size = math.ceil(self.ppo_params.T_max / self.number_of_robot) + 1
+        self.time_step_size = math.ceil(self.ppo_params.T_max / self.number_of_robot)

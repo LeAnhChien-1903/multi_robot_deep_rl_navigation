@@ -3,7 +3,7 @@
 #include <random>
 #include <fstream>
 #include <cstdlib>
-
+#include <Eigen/Core>
 int main(int argc, char** argv)
 {
     ros::init(argc, argv, ros::this_node::getName());
@@ -84,12 +84,14 @@ int main(int argc, char** argv)
     std::uniform_real_distribution<double> y_distribution(double(-floor_size[1]/2 + 1), double(floor_size[1]/2) - 1);
     std::uniform_real_distribution<double> theta_distribution(-180.0, 180.0);
     std::uniform_real_distribution<double> color_distribution(0.0, 1.0);
+    std::vector<Eigen::Vector3d> robot_pose_vector;
     for (int i = 0; i < number_of_robots; i++)
     {
+        robot_pose_vector.push_back(Eigen::Vector3d(x_distribution(random_generator), y_distribution(random_generator), theta_distribution(random_generator)));
         robot_settings.append("robot\n");
         robot_settings.append("(\n");
         robot_settings.append("name " + std::to_string(i) + "\n");
-        robot_settings.append("pose [" + std::to_string(x_distribution(random_generator)) + " " + std::to_string(y_distribution(random_generator)) + " " + std::to_string(0.0) + " " + std::to_string(theta_distribution(random_generator)) + "]\n");
+        robot_settings.append("pose [" + std::to_string(robot_pose_vector.back().x()) + " " + std::to_string(robot_pose_vector.back().y()) + " " + std::to_string(0.0) + " " + std::to_string(robot_pose_vector.back().z()) + "]\n");
         robot_settings.append("color_rgba [" + std::to_string(color_distribution(random_generator)) + " " + std::to_string(color_distribution(random_generator)) + " " + std::to_string(color_distribution(random_generator)) + " " + std::to_string(1.0) + "]\n");
         robot_settings.append(")\n");
     }
@@ -99,6 +101,26 @@ int main(int argc, char** argv)
     world_file << floor_settings;
     world_file << robot_settings;
     world_file.close();
+
+    // Write launch file for robot tf
+    std::ofstream tf_file("/home/leanhchien/deep_rl_ws/src/multi_robot_deep_rl_navigation/multi_robot_environment/launch/robot_tf.launch");
+    tf_file << "<launch>\n";
+    // "<node pkg="tf" type="static_transform_publisher" name="base_link_to_laser" args="0.4 0 0 3.14 0 0 base_link laser 20"/>"
+    for (int i = 0; i < number_of_robots; i++)
+    {
+        std::string tf_settings;
+        
+        tf_settings.append("\t<node pkg=\"tf\" type=\"static_transform_publisher\" ");
+        tf_settings.append("name=\"map_to_odom_robot_" + std::to_string(i) + "\" ");
+        tf_settings.append("args=\"" + std::to_string(robot_pose_vector[i].x()) + " " + std::to_string(robot_pose_vector[i].y()) + " "
+                            + std::to_string(0.0) + " " + std::to_string(robot_pose_vector[i].z()) + " 0.0 0.0 map robot_" 
+                            + std::to_string(i) + "/odom 20\"/>\n");
+        tf_file << tf_settings ;
+    }
+    
+    tf_file << "</launch>";
+
+    tf_file.close();
     ros::spinOnce();
     return 0;
 }

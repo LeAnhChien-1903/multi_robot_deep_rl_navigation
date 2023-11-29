@@ -10,5 +10,6 @@
         "/home/leanhchien/.local/lib/python3.8/site-packages",
         "./include/deep_rl_navigation"
     ],
-    "python.analysis.typeCheckingMode": "off"
+    "python.analysis.typeCheckingMode": "off",
+    "python.analysis.autoImportCompletions": true
 }

@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
 import rospy
-from tf.transformations import euler_from_quaternion
+from tf.transformations import euler_from_quaternion, quaternion_from_euler
 
 import numpy as np
 import math
@@ -9,125 +9,214 @@ import os
 
 import torch
 import random
-import torch.nn as neuron_network
 
 from nav_msgs.msg import Odometry
 from sensor_msgs.msg import LaserScan
-from geometry_msgs.msg import Twist
-from std_msgs.msg import Float32
+from geometry_msgs.msg import Twist, Point
+from visualization_msgs.msg import MarkerArray, Marker
 
 from deep_rl_navigation.ultis import *
 from deep_rl_navigation.actor_critic import *
 
-# Seeding
-random.seed(1)
-np.random.seed(1)
-torch.manual_seed(1)
-
 class Agent:
-    def __init__(self, name: str):
+    def __init__(self, name: str, hyper_param: HyperParameters):
         self.robot_name = name
-        self.setup_params = Setup() # setup parameters for navigation
-        self.ppo_params = PPO() # ppo parameters for training
-        self.hybrid_params = Hybrid() # hybrid parameters for hybrid control
-        self.reward = Reward()
-        # Initialize hyper parameters
-        self.initializeParameters()
+        self.setup: Setup = hyper_param.setup
+        self.reward: Reward = Reward()
         # Initialize observation
-        self.observation = Observation(self.setup_params.num_observations, self.setup_params.num_laser_ray)
+        self.observation = Observation(hyper_param.setup.num_observations, hyper_param.setup.num_laser_ray)
         # Robot pose and goal pose
         self.robot_pose = np.zeros(3, dtype=np.float32)
-        self.goal_pose = self.randomPose()
+        self.randomPose()
         self.current_vel = np.zeros(2, dtype=np.float32)
         # Laser data
-        self.laser_data = np.zeros(self.setup_params.num_laser_ray, dtype=np.float32)
-        # Actor and Critic
-        self.actor_critic = ActorCritic(self.parameters_path)
-        # Step initialization
-        self.step: int = 0
-        # Initialize the storage
-        self.initializeStorage()
-        self.folder_name = "/home/leanhchien/deep_rl_ws/src/multi_robot_deep_rl_navigation/deep_rl_navigation/data" + self.robot_name
-        if not os.path.exists(self.folder_name):
-            os.mkdir(self.folder_name)
-        # Initialize Publisher and Subscriber
-        self.initializePublisherAndSubscriber()
+        self.laser_data = np.zeros(hyper_param.setup.num_laser_ray, dtype=np.float32)
+        # Subscriber
+        self.odometry_sub = rospy.Subscriber(self.robot_name + "/" + hyper_param.setup.odometry_topic, Odometry, self.odometryCallback, queue_size= 10)
+        self.laser_scan_sub = rospy.Subscriber(self.robot_name + "/" + hyper_param.setup.laser_scan_topic, LaserScan, self.getLaserData, queue_size= 10)
+        self.cmd_vel_pub = rospy.Publisher(self.robot_name + "/" + hyper_param.setup.cmd_vel_topic, Twist, queue_size= 10)
+        self.markers_pub = rospy.Publisher(self.robot_name + "/robot_visualization", MarkerArray, queue_size= 10)
+        # Random color
+        self.color = np.array([random.uniform(0.0, 1.0), random.uniform(0.0, 1.0), random.uniform(0.0, 1.0)])
+        
+        self.path_marker = Marker()
+        self.path_marker.header.stamp = rospy.Time.now()
+        self.path_marker.header.frame_id = "map"
+        self.path_marker.ns = "robot_path"
+        self.path_marker.action = self.path_marker.ADD
+        self.path_marker.type = self.path_marker.LINE_STRIP
+        
+        self.path_marker.pose.orientation.x = 0.0
+        self.path_marker.pose.orientation.y = 0.0
+        self.path_marker.pose.orientation.z = 0.0
+        self.path_marker.pose.orientation.w = 1.0
+    
+        self.path_marker.scale.x = 0.05
+        self.path_marker.scale.y = 0.05
+        self.path_marker.scale.z = 0.05
+        
+        self.path_marker.color.r = self.color[0]
+        self.path_marker.color.g = self.color[1]
+        self.path_marker.color.b = self.color[2]
+        self.path_marker.color.a = 1.0
 
-    def timerCallback(self, event):
+    def step(self, actor: ActorDiscrete, critic: CriticDiscrete):
         '''
             Timer callback function for implement navigation
         '''
-        if self.step < self.time_step_size:
-            if (self.robot_name == "/robot_0"):
-                print(self.step)
-            done = self.goalReached()
-            # Set the current observation
-            self.observation.setObservation(self.laser_data, self.robot_pose, self.goal_pose, self.current_vel)
-            laser_obs, goal_obs, vel_obs = self.transformObservation()
-            
-            # Get the reward
-            reward = self.reward.calculateReward(self.laser_data, self.robot_pose, self.goal_pose, self.current_vel, self.setup_params.robot_radius)
-            self.reward_storage[self.step] = torch.tensor(reward)
-            # Store the current observation
-            self.laser_obs_storage[self.step] = laser_obs
-            self.goal_obs_storage[self.step] = goal_obs
-            self.vel_obs_storage[self.step] = vel_obs
-            
-            # Get action and value function
-            action, value, log_prob, entropy = self.actor_critic.get_action_and_value(laser_obs, goal_obs, vel_obs)
-            self.action_storage[self.step] = action
-            self.log_prob_storage[self.step] = log_prob
-            self.entropy_storage[self.step] = entropy
-            self.value_storage[self.step] = value
-            self.done_storage[self.step] = torch.tensor(done)
-            
-            reward_msg = Float32()
-            reward_msg.data = reward
-            self.reward_pub.publish(reward_msg)
-            
-            cmd_vel = Twist()
-            cmd_vel.linear.x = action.numpy()[0]
-            cmd_vel.angular.z = action.numpy()[1]
-            self.cmd_vel_pub.publish(cmd_vel)
-            self.step += 1
-        else:
-            cmd_vel = Twist()
-            self.cmd_vel_pub.publish(cmd_vel)
-            # Store the data to files
-            torch.save(self.laser_obs_storage, self.folder_name + "/" + "laser_obs.pt")
-            torch.save(self.goal_obs_storage, self.folder_name + "/" + "goal_obs.pt")
-            torch.save(self.vel_obs_storage, self.folder_name + "/" + "vel_obs.pt")
-            torch.save(self.reward_storage, self.folder_name + "/" + "reward.pt")
-            torch.save(self.action_storage, self.folder_name + "/" + "actions.pt")
-            torch.save(self.log_prob_storage, self.folder_name + "/" + "log_prob.pt")
-            torch.save(self.value_storage, self.folder_name + "/" + "value.pt")
-            torch.save(self.done_storage, self.folder_name + "/" + "done.pt")
-            torch.save(self.entropy_storage, self.folder_name + "/" + "entropy.pt")
-
-    def initializeStorage(self):
-        """
-            Setup the storage for observation, action, log probability, reward, value, done state
-        """
-        self.laser_obs_storage = torch.zeros((self.time_step_size, 1, self.setup_params.num_observations, self.setup_params.num_laser_ray))
-        self.goal_obs_storage = torch.zeros((self.time_step_size, 2))
-        self.vel_obs_storage = torch.zeros((self.time_step_size, 2))
-        self.action_storage = torch.zeros((self.time_step_size, 2))
-        self.log_prob_storage = torch.zeros(self.time_step_size)
-        self.reward_storage = torch.zeros(self.time_step_size)
-        self.value_storage = torch.zeros(self.time_step_size)
-        self.done_storage = torch.zeros(self.time_step_size)
-        self.entropy_storage = torch.zeros(self.time_step_size)
+        # Get done
+        self.robot_visualization()
+        done = self.goalReached()
+        # Calculate the reward at state
+        reward = self.reward.calculateReward(self.laser_data, self.robot_pose, self.goal_pose, self.current_vel, self.setup.robot_radius)
         
-    def initializePublisherAndSubscriber(self):
-        '''
-            Initialize the publisher and subscriber
-        '''
-        self.odometry_sub = rospy.Subscriber(self.robot_name + "/" + self.setup_params.odometry_topic, Odometry, self.odometryCallback)
-        self.laser_scan_sub = rospy.Subscriber(self.robot_name + "/" + self.setup_params.laser_scan_topic, LaserScan, self.getLaserData)
-        self.cmd_vel_pub = rospy.Publisher(self.robot_name + "/" + self.setup_params.cmd_vel_topic, Twist, queue_size= 10)
-        self.reward_pub = rospy.Publisher(self.robot_name + "/reward", Float32, queue_size= 10)
-        self.timer = rospy.Timer(rospy.Duration(self.setup_params.sample_time), self.timerCallback)
+        # Get the current state
+        self.observation.setObservation(self.laser_data, self.robot_pose, self.goal_pose, self.current_vel)
+        laser_obs, goal_obs, vel_obs = self.transformObservation()
+        
+        # Get action and value function
+        linear_vel, angular_vel, action_log_prob, linear_probs, angular_probs = actor.get_action(laser_obs, goal_obs, vel_obs)
+        value = critic.get_value(laser_obs, goal_obs, vel_obs)
+        
+        sample: dict = {'laser_obs': laser_obs, 'goal_obs': goal_obs, 'vel_obs': vel_obs,
+                        'linear': linear_vel, 'angular': angular_vel, 'log_prob': action_log_prob, 
+                        'linear_probs': linear_probs, 'angular_probs': angular_probs, 'value': value,
+                        'reward': reward, 'done': done}
+        return sample
+    def run_policy(self, actor: ActorDiscrete):
+        self.robot_visualization()
+        done = self.goalReached()
+        # Calculate the reward at state
+        reward = self.reward.calculateReward(self.laser_data, self.robot_pose, self.goal_pose, self.current_vel, self.setup.robot_radius)
+        
+        # Get the current state
+        self.observation.setObservation(self.laser_data, self.robot_pose, self.goal_pose, self.current_vel)
+        laser_obs, goal_obs, vel_obs = self.transformObservation()
+        
+        # Get action and value function
+        linear_vel, angular_vel, log_prob = actor.exploit_policy(laser_obs, goal_obs, vel_obs)
+        
+        return linear_vel, angular_vel, log_prob, reward, done
+    def robot_visualization(self):
+        visual_markers = MarkerArray()
+        robot_marker = Marker()
+        robot_marker.header.stamp = rospy.Time.now()
+        robot_marker.header.frame_id = "map"
+        robot_marker.ns = "robot_position"
+        robot_marker.action = robot_marker.ADD
+        robot_marker.type = robot_marker.CUBE
+        
+        robot_marker.pose.position.x = self.robot_pose[0]
+        robot_marker.pose.position.y = self.robot_pose[1]
+        robot_marker.pose.position.z = 0.2
+        
+        q = quaternion_from_euler(0, 0, self.robot_pose[2])
+        robot_marker.pose.orientation.x = q[0]
+        robot_marker.pose.orientation.y = q[1]
+        robot_marker.pose.orientation.z = q[2]
+        robot_marker.pose.orientation.w = q[3]
+        
+        robot_marker.scale.x = 0.9
+        robot_marker.scale.y = 0.6
+        robot_marker.scale.z = 0.4
+        
+        robot_marker.color.r = self.color[0]
+        robot_marker.color.g = self.color[1]
+        robot_marker.color.b = self.color[2]
+        robot_marker.color.a = 1.0
+        
+        visual_markers.markers.append(robot_marker)
+        
+        goal_marker = Marker()
+        goal_marker.header.stamp = rospy.Time.now()
+        goal_marker.header.frame_id = "map"
+        goal_marker.ns = "robot_goal"
+        goal_marker.action = goal_marker.ADD
+        goal_marker.type = goal_marker.CUBE
+        
+        goal_marker.pose.position.x = self.goal_pose[0]
+        goal_marker.pose.position.y = self.goal_pose[1]
+        goal_marker.pose.position.z = 0.2
+        
+        q = quaternion_from_euler(0, 0, self.goal_pose[2])
+        goal_marker.pose.orientation.x = q[0]
+        goal_marker.pose.orientation.y = q[1]
+        goal_marker.pose.orientation.z = q[2]
+        goal_marker.pose.orientation.w = q[3]
+        
+        goal_marker.scale.x = 0.9
+        goal_marker.scale.y = 0.6
+        goal_marker.scale.z = 0.4
+        
+        goal_marker.color.r = self.color[0]
+        goal_marker.color.g = self.color[1]
+        goal_marker.color.b = self.color[2]
+        goal_marker.color.a = 1.0
+        
+        visual_markers.markers.append(goal_marker)
 
+        p = Point()
+        p.x = self.robot_pose[0]
+        p.y = self.robot_pose[1]
+        self.path_marker.points.append(p)
+        visual_markers.markers.append(self.path_marker)
+        
+        # if self.robot_name == "/robot_0":
+        #     wall_marker = Marker()
+        #     wall_marker.header.stamp = rospy.Time.now()
+        #     wall_marker.header.frame_id = "map"
+        #     wall_marker.ns = "wall"
+        #     wall_marker.action = wall_marker.ADD
+        #     wall_marker.type = wall_marker.LINE_STRIP
+            
+        #     wall_marker.pose.orientation.x = 0.0
+        #     wall_marker.pose.orientation.y = 0.0
+        #     wall_marker.pose.orientation.z = 0.0
+        #     wall_marker.pose.orientation.w = 1.0
+        
+        #     wall_marker.scale.x = 0.1
+        #     wall_marker.scale.y = 0.1
+        #     wall_marker.scale.z = 0.1
+            
+        #     wall_marker.color.r = 1.0
+        #     wall_marker.color.g = 0.0
+        #     wall_marker.color.b = 0.0
+        #     wall_marker.color.a = 1.0
+            
+        #     p1 = Point()
+        #     p1.x = -self.setup.map_length / 2
+        #     p1.y = -self.setup.map_width / 2
+        #     p1.z = 0.05
+        #     wall_marker.points.append(p1)
+            
+        #     p2 = Point()
+        #     p2.x = -self.setup.map_length / 2
+        #     p2.y = self.setup.map_width / 2
+        #     p2.z = 0.05
+        #     wall_marker.points.append(p2)
+            
+        #     p3 = Point()
+        #     p3.x = self.setup.map_length / 2
+        #     p3.y = self.setup.map_width / 2
+        #     p3.z = 0.05
+        #     wall_marker.points.append(p3)
+            
+        #     p4 = Point()
+        #     p4.x = self.setup.map_length / 2
+        #     p4.y = -self.setup.map_width / 2
+        #     p4.z = 0.05
+        #     wall_marker.points.append(p4)
+            
+        #     p5 = Point()
+        #     p5.x = -self.setup.map_length / 2
+        #     p5.y = -self.setup.map_width / 2
+        #     p5.z = 0.05
+        #     wall_marker.points.append(p5)
+            
+        #     visual_markers.markers.append(wall_marker)
+        
+        self.markers_pub.publish(visual_markers)
+        
     def odometryCallback(self, odom: Odometry):
         '''
             Get robot pose and robot velocity from odometry ground truth
@@ -151,101 +240,45 @@ class Agent:
             laser_scan: laser scan topic
         '''
         # Convert laser scan to center of robot
-        extra_x = self.setup_params.lidar_x * math.cos(self.robot_pose[2]) - self.setup_params.lidar_y * math.sin(self.robot_pose[2])
-        extra_y = self.setup_params.lidar_x * math.sin(self.robot_pose[2]) + self.setup_params.lidar_y * math.cos(self.robot_pose[2])
-        extra_theta = normalize_angle(self.robot_pose[2] + self.setup_params.lidar_theta)
+        extra_theta = normalize_angle(self.robot_pose[2] + self.setup.lidar_theta)
         for i in range(len(laser_scan.ranges)):
-            if (laser_scan.ranges[i] < laser_scan.range_min and laser_scan.ranges[i] > laser_scan.range_max):
-                self.laser_data[i] = 500.0
-            else:
-                angle = normalize_angle(laser_scan.angle_min + i * laser_scan.angle_increment + extra_theta)
-                range_x = laser_scan.ranges[i] * math.cos(angle) + extra_x
-                range_y = laser_scan.ranges[i] * math.sin(angle) + extra_y
+            angle = normalize_angle(laser_scan.angle_min + i * laser_scan.angle_increment + extra_theta)
+            if laser_scan.ranges[i] > laser_scan.range_max:
+                range_x = laser_scan.range_max * math.cos(angle) + self.setup.lidar_x
+                range_y = laser_scan.range_max * math.sin(angle) + self.setup.lidar_y
                 self.laser_data[i] = math.hypot(range_x, range_y)
-
+            elif (laser_scan.ranges[i] < laser_scan.range_min):
+                range_x = math.cos(angle) + self.setup.lidar_x
+                range_y = math.sin(angle) + self.setup.lidar_y
+                self.laser_data[i] = math.hypot(range_x, range_y)
+            else:
+                range_x = laser_scan.ranges[i] * math.cos(angle) + self.setup.lidar_x
+                range_y = laser_scan.ranges[i] * math.sin(angle) + self.setup.lidar_y
+                self.laser_data[i] = math.hypot(range_x, range_y)
+        # print(self.robot_name, self.laser_data.flatten())
     def transformObservation(self):
+        # laser_data = self.observation.laser_data.copy() / 100 # Normalize with 100 is max value
+        # goal_data = self.observation.goal_relation.copy() / 100 # Normalize with 100 is max value
+        # vel_data = self.observation.current_velocity.copy() / 100 # Normal with 100 is max value
+        # observation = np.append(self.observation.laser_data.flatten().copy(), self.observation.goal_relation[0])
+        mean = self.observation.laser_data.mean()
+        std_deviation = self.observation.laser_data.std()
+        # Normalize the observation
+        laser_data = (self.observation.laser_data.copy() - mean) / std_deviation
+        goal_data = np.zeros(2).astype(np.float32)
+        goal_data[0] = self.observation.goal_relation[0]/self.observation.laser_data.max()
+        goal_data[1] = (self.observation.goal_relation[1]/math.pi)
         
-        laser_obs = torch.from_numpy(self.observation.laser_data.reshape((1, self.setup_params.num_observations, self.setup_params.num_laser_ray)))
-        goal_obs = torch.from_numpy(self.observation.goal_relation)
-        vel_obs = torch.from_numpy(self.observation.current_velocity)
-        
+        laser_obs = torch.from_numpy(laser_data.reshape((1, self.setup.num_observations, self.setup.num_laser_ray)))
+        goal_obs = torch.from_numpy(goal_data)
+        vel_obs = torch.from_numpy(self.observation.current_velocity.copy())
         return laser_obs, goal_obs, vel_obs
     
     def goalReached(self):
         distance = calculatedDistance(self.robot_pose[0:2], self.goal_pose[0:2])
-        if distance < self.setup_params.goal_tolerance:
+        if distance < self.setup.goal_tolerance:
             return True
-        
         return False
     
     def randomPose(self):        
-        return np.array([random.uniform(-self.setup_params.map_width/2, self.setup_params.map_width/2), 
-                            random.uniform(-self.setup_params.map_length/2, self.setup_params.map_length/2),
-                            random.uniform(-math.pi, math.pi)])
-        
-    def initializeParameters(self):
-        '''
-            Initialize the parameters from ros param
-        '''
-        # Setup parameters
-        self.setup_params.sample_time = rospy.get_param("/sample_time")
-        
-        self.setup_params.laser_scan_topic = rospy.get_param("/laser_scan_topic")
-        self.setup_params.odometry_topic = rospy.get_param("/odometry_topic")
-        self.setup_params.cmd_vel_topic = rospy.get_param("/cmd_vel_topic")
-        
-        self.setup_params.min_linear_velocity = rospy.get_param("/min_linear_velocity")
-        self.setup_params.max_linear_velocity = rospy.get_param("/max_linear_velocity")
-        self.setup_params.min_angular_velocity = rospy.get_param("/min_angular_velocity")
-        self.setup_params.max_angular_velocity = rospy.get_param("/max_angular_velocity")
-        self.setup_params.max_linear_acceleration = rospy.get_param("/max_linear_acceleration")
-        self.setup_params.max_angular_acceleration = rospy.get_param("/max_angular_acceleration")
-        self.setup_params.num_observations = rospy.get_param("/num_observations")
-        self.setup_params.num_laser_ray = rospy.get_param("/num_laser_ray")
-        self.setup_params.goal_tolerance = rospy.get_param("/goal_tolerance")
-        
-        self.setup_params.robot_length = rospy.get_param("/robot_length")
-        self.setup_params.robot_width = rospy.get_param("/robot_width")
-        
-        self.setup_params.lidar_x = rospy.get_param("/lidar_x")
-        self.setup_params.lidar_y = rospy.get_param("/lidar_y")
-        self.setup_params.lidar_theta = rospy.get_param("/lidar_theta")
-        
-        self.setup_params.map_length = rospy.get_param("/map_length")
-        self.setup_params.map_width = rospy.get_param("/map_width")
-        
-        self.setup_params.robot_radius = math.hypot(self.setup_params.robot_width/2, self.setup_params.robot_length/2) + 0.05
-        # Reward parameters
-        self.reward.r_arrival = rospy.get_param("/reward/r_arrival")
-        self.reward.r_collision = rospy.get_param("/reward/r_collision")
-        self.reward.omega_g = rospy.get_param("/reward/omega_g")
-        self.reward.omega_w = rospy.get_param("/reward/omega_w")
-        self.reward.large_angular_velocity = rospy.get_param("/reward/large_angular_velocity")
-        self.reward.goal_tolerance = rospy.get_param("/goal_tolerance")
-
-        # PPO hyper parameters
-        self.ppo_params.lambda_ = rospy.get_param("/ppo/lambda")
-        self.ppo_params.gamma = rospy.get_param("/ppo/gamma")
-        self.ppo_params.T_max = rospy.get_param("/ppo/T_max")
-        self.ppo_params.E_phi = rospy.get_param("/ppo/E_phi")
-        self.ppo_params.beta = rospy.get_param("/ppo/beta")
-        self.ppo_params.KL_target = rospy.get_param("/ppo/KL_target")
-        self.ppo_params.xi = rospy.get_param("/ppo/xi")
-        self.ppo_params.lr_theta_1st = rospy.get_param("/ppo/lr_theta_1st")
-        self.ppo_params.lr_theta_2nd = rospy.get_param("/ppo/lr_theta_2nd")
-        self.ppo_params.E_v = rospy.get_param("/ppo/E_v")
-        self.ppo_params.lr_phi = rospy.get_param("/ppo/lr_phi")
-        self.ppo_params.beta_high = rospy.get_param("/ppo/beta_high")
-        self.ppo_params.alpha = rospy.get_param("/ppo/alpha")
-        self.ppo_params.beta_low = rospy.get_param("/ppo/beta_low")
-        # Hybrid control hyper parameters
-        self.hybrid_params.r_safe = rospy.get_param("/hybrid/r_safe")
-        self.hybrid_params.r_risk = rospy.get_param("/hybrid/r_risk")
-        self.hybrid_params.p_scale = rospy.get_param("/hybrid/p_scale")
-        self.hybrid_params.v_max = rospy.get_param("/hybrid/v_max")
-        
-        # Path to save parameters
-        self.parameters_path = rospy.get_param("/parameters_path")
-        self.number_of_robot = rospy.get_param("/number_of_robot")
-        
-        self.time_step_size = math.ceil(self.ppo_params.T_max / self.number_of_robot)
+        self.goal_pose = np.array([random.uniform(-self.setup.map_width/2 + 1.0, self.setup.map_width/2 - 1.0), random.uniform(-self.setup.map_length/2 + 1.0, self.setup.map_length/2 - 1.0), random.uniform(-math.pi, math.pi)])

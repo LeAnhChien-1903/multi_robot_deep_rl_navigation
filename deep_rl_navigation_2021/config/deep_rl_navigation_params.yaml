@@ -1,0 +1,58 @@
+sample_time: 0.1
+laser_scan_topic: base_scan
+odometry_topic: base_pose_ground_truth
+cmd_vel_topic: cmd_vel
+min_linear_velocity: 0.0 # m/s
+max_linear_velocity: 1.0 # m/s
+min_angular_velocity: -1.0 # rad/s
+max_angular_velocity: 1.0 # rad/s
+max_linear_acceleration: 2.0 # m/s^2
+max_angular_acceleration: 2.0 # rad/s^2
+robot_width: 0.6 # m
+robot_length: 0.9 # m
+lidar_x: 0.4
+lidar_y: 0.0
+lidar_theta: 0.0
+map_length: 20.0
+map_width: 20.0
+num_observations: 4
+num_laser_ray: 541
+goal_tolerance: 0.1
+
+reward:
+  v_goal: 1.0
+  v_collision: -1.0
+  d_pos: 0.01
+  d_neg: 0.002
+  alpha_pos: 0.001
+  alpha_neg: 0.0002
+  l_pos: 0.05
+  l_neg: 0.01
+  w_neg: 0.01
+  period: 10
+  changes: 7
+
+ppo:
+  lambda: 0.95
+  gamma: 0.99
+  T_max: 2000
+  E_phi: 20
+  beta: 1.0
+  KL_target: 0.0015
+  xi: 50.0
+  lr_theta_1st: 0.00005
+  lr_theta_2nd: 0.00002
+  E_v: 10
+  lr_phi: 0.001
+  beta_high: 2.0
+  alpha: 1.5
+  beta_low: 0.5
+
+hybrid:
+  r_safe: 0.1
+  r_risk: 0.8
+  p_scale: 1.25
+  v_max: 0.5
+
+number_of_robot: 5
+number_of_action: 21

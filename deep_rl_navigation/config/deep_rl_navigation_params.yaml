@@ -13,8 +13,8 @@ robot_length: 0.9 # m
 lidar_x: 0.4
 lidar_y: 0.0
 lidar_theta: 0.0
-map_length: 10.0
-map_width: 10.0
+map_length: 20.0
+map_width: 20.0
 num_observations: 3
 num_laser_ray: 541
 goal_tolerance: 0.1
@@ -29,7 +29,7 @@ reward:
 ppo:
   lambda: 0.95
   gamma: 0.99
-  T_max: 1000
+  T_max: 2000
   E_phi: 20
   beta: 1.0
   KL_target: 0.0015

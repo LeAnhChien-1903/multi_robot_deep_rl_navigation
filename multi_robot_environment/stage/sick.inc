@@ -2,7 +2,7 @@
 define sick_s300 sensor
 (				
     # factory settings for Sick S300 sensor
-    range [ 0.12 30.0 ]
+    range [ 0.00 30.0 ]
     pose [ 0 0 0.1 0 ]
     fov 270
     samples 541

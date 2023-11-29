@@ -4,10 +4,8 @@
     <param name="/use_sim_time" value="true"/>
 
     <!--  ************** Create world file ***************  -->
-    <!-- <rosparam command="load" file="$(find multi_robot_environment)/config/random_scenarios.yaml"/>
-    <node pkg="multi_robot_environment" type="random_scenarios" name="random_scenarios" output="screen"/> -->
+    <rosparam command="load" file="$(find multi_robot_environment)/config/random_scenarios.yaml"/>
+    <node pkg="multi_robot_environment" type="random_scenarios" name="random_scenarios" output="screen"/>
     <!--  ************** Stage Simulator ***************  -->
-    <node pkg="stage_ros" type="stageros" name="stageros" args="$(find multi_robot_environment)/stage/empty.world">
-    </node>
-    
+    <node pkg="stage_ros" type="stageros" name="stageros" args="$(find multi_robot_environment)/stage/empty.world"/>
 </launch>
