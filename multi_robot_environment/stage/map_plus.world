@@ -16,18 +16,18 @@ interval_sim 100
 
 window
 (
-    size [500.0 500.0]
+    size [450.0 450.0]
     center [0.000000 0.000000]
     rotate [0.000000 0.000000]
     scale 20
-    show_data 0
+    show_data 1
     show_grid 1
-    show_footprints 0
+    show_footprints 1
 )
 floor
 (
-    name "plus_map"
-    bitmap "../maps/map_plus.png"
+    name "empty"
+    bitmap "../maps/empty.png"
     size [20.000000 20.000000 2.000000]
 )
 define robot robot_base
