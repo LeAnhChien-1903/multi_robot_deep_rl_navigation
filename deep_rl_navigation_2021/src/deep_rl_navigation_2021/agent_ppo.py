@@ -62,7 +62,7 @@ class Agent:
         self.path_marker.color.b = self.color[2]
         self.path_marker.color.a = 1.0
 
-    def step(self, actor: Actor, critic: Critic, device):
+    def step(self, policy: ActorCritic, device):
         '''
             Timer callback function for implement navigation
         '''
@@ -70,7 +70,6 @@ class Agent:
         self.robot_visualization()
         done = self.goalReached()
         
-        
         # Get the current state
         laser_data, orient_data, dist_data, vel_data = self.observation.setObservation(self.laser_data, self.robot_pose, self.goal_pose, self.current_vel[0], self.current_vel[1])
         # Calculate the reward at state
@@ -81,15 +80,14 @@ class Agent:
         vel_obs = torch.from_numpy(vel_data.reshape(1, 2)).to(device)
         
         # Get action and value function
-        linear_vel, angular_vel, action_log_prob, linear_probs, angular_probs = actor.get_action(laser_obs, orient_obs, dist_obs, vel_obs)
-        value = critic.get_value(laser_obs, orient_obs, dist_obs, vel_obs)
+        linear_vel, angular_vel, action_log_prob, linear_probs, angular_probs, value = policy.get_action(laser_obs, orient_obs, dist_obs, vel_obs)
         
         sample: dict = {'laser_obs': laser_obs, 'orient_obs': orient_obs, 'dist_obs': dist_obs,'vel_obs': vel_obs,
                         'linear': linear_vel, 'angular': angular_vel, 'log_prob': action_log_prob, 
                         'linear_probs': linear_probs, 'angular_probs': angular_probs, 'value': value,
                         'reward': reward, 'done': done}
         return sample
-    def run_policy(self, actor: Actor, device):
+    def run_policy(self, policy: ActorCritic, device):
         self.robot_visualization()
         done = self.goalReached()
         # Get the current state
@@ -102,7 +100,7 @@ class Agent:
         vel_obs = torch.from_numpy(vel_data.reshape(1, 2)).to(device)
         
         # Get action and value function
-        linear_vel, angular_vel, log_prob = actor.exploit_policy(laser_obs, orient_obs, dist_obs, vel_obs)
+        linear_vel, angular_vel, log_prob = policy.exploit_policy(laser_obs, orient_obs, dist_obs, vel_obs)
         
         return linear_vel, angular_vel, log_prob, reward, done
     def robot_visualization(self):
@@ -237,6 +235,7 @@ class Agent:
             self.goal_pose = np.array([8.0, -1.0, 0.0])
         elif id == 7:
             self.goal_pose = np.array([8.0, 1.0, 0.0])
+    
     def setColorInMapPlus(self):
         id = int(self.robot_name.split("_")[1])
         if id == 0:
