@@ -19,7 +19,7 @@ catkin_package()
 
 catkin_install_python(PROGRAMS 
   src/main.py
-  src/run_and_train.py
+  src/train_policy.py
   src/test_policy.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
