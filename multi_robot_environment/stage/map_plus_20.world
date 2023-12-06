@@ -25,12 +25,12 @@ window
     show_trailarrows 1
 
 )
-#floor
-#(
-#    name "empty"
-#    bitmap "../maps/empty_20.png"
-#    size [30.000000 30.000000 2.000000]
-#)
+floor
+(
+    name "empty"
+    bitmap "../maps/empty_20.png"
+    size [30.000000 30.000000 2.000000]
+)
 define robot robot_base
 (
 sick_laser(pose [0.400000 0.000000 -0.200000 0.000000])
