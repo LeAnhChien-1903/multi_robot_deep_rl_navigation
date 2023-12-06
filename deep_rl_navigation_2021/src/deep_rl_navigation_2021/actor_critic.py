@@ -87,16 +87,11 @@ class Actor(nn.Module):
         linear_probs:torch.Tensor = self.out_linear_net(final_out)
         angular_probs: torch.Tensor = self.out_angular_net(final_out)
         
-        # Create linear velocity and angular velocity distributions
-        linear_distribution = Categorical(linear_probs)
-        angular_distribution = Categorical(angular_probs)
-        
         # Get action
         linear_vel = linear_probs.argmax(-1)
         angular_vel = angular_probs.argmax(-1)
-        log_prob = linear_distribution.log_prob(linear_vel) + angular_distribution.log_prob(angular_vel)
         
-        return linear_vel, angular_vel, log_prob
+        return linear_vel, angular_vel
 
     def evaluate(self, laser_obs: torch.Tensor,  orient_obs: torch.Tensor, dist_obs: torch.Tensor, vel_obs: torch.Tensor, linear_vel: torch.Tensor, angular_vel: torch.Tensor):
         laser_out = self.laser_net(laser_obs)

@@ -22,7 +22,7 @@ class Agent:
     def __init__(self, name: str, hyper_param: HyperParameters):
         self.robot_name = name
         self.setup: Setup = hyper_param.setup
-        self.reward: Reward = Reward(hyper_param.reward, hyper_param.setup.goal_tolerance, self.setup.robot_radius)
+        self.reward: Reward = Reward(hyper_param.reward, self.setup.robot_radius, hyper_param.setup)
         # Initialize observation
         self.observation = Observation(hyper_param.setup.num_observations, hyper_param.setup.num_laser_ray)
         # Robot pose and goal pose

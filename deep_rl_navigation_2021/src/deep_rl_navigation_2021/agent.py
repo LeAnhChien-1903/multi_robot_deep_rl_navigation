@@ -22,7 +22,7 @@ class Agent:
     def __init__(self, name: str, hyper_param: HyperParameters):
         self.robot_name = name
         self.setup: Setup = hyper_param.setup
-        self.reward: Reward = Reward(hyper_param.reward, hyper_param.setup.goal_tolerance, self.setup.robot_radius)
+        self.reward: Reward = Reward(hyper_param.reward, self.setup.robot_radius, hyper_param.setup)
         # Initialize observation
         self.observation = Observation(hyper_param.setup.num_observations, hyper_param.setup.num_laser_ray)
         # Robot pose and goal pose
@@ -92,6 +92,7 @@ class Agent:
     def run_policy(self, actor: Actor, device):
         self.robot_visualization()
         done = self.goalReached()
+        
         # Get the current state
         laser_data, orient_data, dist_data, vel_data = self.observation.setObservation(self.laser_data, self.robot_pose, self.goal_pose, self.current_vel[0], self.current_vel[1])
         # Calculate the reward at state
@@ -102,9 +103,9 @@ class Agent:
         vel_obs = torch.from_numpy(vel_data.reshape(1, 2)).to(device)
         
         # Get action and value function
-        linear_vel, angular_vel, log_prob = actor.exploit_policy(laser_obs, orient_obs, dist_obs, vel_obs)
+        linear_vel, angular_vel = actor.exploit_policy(laser_obs, orient_obs, dist_obs, vel_obs)
         
-        return linear_vel, angular_vel, log_prob, reward, done
+        return linear_vel, angular_vel, reward, done
     def robot_visualization(self):
         visual_markers = MarkerArray()
         robot_marker = Marker()

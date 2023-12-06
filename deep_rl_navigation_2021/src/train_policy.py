@@ -81,147 +81,107 @@ critic_optimizer = torch.optim.Adam(critic.parameters(), lr= hyper_params.ppo.lr
 
 rate = rospy.Rate(float(1/hyper_params.setup.sample_time))
 
-for i in range(300):
+# for i in range(300):
 # Load beta parameters
-    beta_file = open(os.path.join(parameter_path, "beta.txt"), 'r')
-    hyper_params.ppo.beta = float(beta_file.read())
-    beta_file.close()
+beta_file = open(os.path.join(parameter_path, "beta.txt"), 'r')
+hyper_params.ppo.beta = float(beta_file.read())
+beta_file.close()
 
-    print("Current beta:", hyper_params.ppo.beta)
+print("Current beta:", hyper_params.ppo.beta)
 
-    single_buffer_list = []
+single_buffer_list = []
+for i in range(hyper_params.number_of_robot):
+    # agents[i].randomPose()    
+    single_buffer_list.append(SingleBuffer(hyper_params.mini_batch_size, hyper_params.setup, hyper_params.number_of_action, device))
+# Check data 
+for i in range(10):
+    rate.sleep()
+
+# Collect the data
+for t in range(hyper_params.mini_batch_size + 1):
+    print("Collecting data at t = {}".format(round(t*hyper_params.setup.sample_time, 1)))
+    cmd_vel_list = []
     for i in range(hyper_params.number_of_robot):
-        # agents[i].randomPose()    
-        single_buffer_list.append(SingleBuffer(hyper_params.mini_batch_size, hyper_params.setup, hyper_params.number_of_action, device))
-    # Check data 
-    for i in range(10):
-        rate.sleep()
+        # Collect the sample data
+        sample: dict = agents[i].step(actor, critic, device)
 
-    # Collect the data
-    for t in range(hyper_params.mini_batch_size + 1):
-        print("Collecting data at t = {}".format(round(t*hyper_params.setup.sample_time, 1)))
-        cmd_vel_list = []
-        for i in range(hyper_params.number_of_robot):
-            # Collect the sample data
-            sample: dict = agents[i].step(actor, critic, device)
+        # Update sampled data
+        single_buffer_list[i].update(t, sample)
 
-            # Update sampled data
-            single_buffer_list[i].update(t, sample)
-
-            # Publish the velocity to robot
-            cmd_vel = Twist()
-            cmd_vel.linear.x = linear_vel_vector[sample['linear'][0].item()]
-            cmd_vel.angular.z = angular_vel_vector[sample['angular'][0].item()]
-            cmd_vel_list.append(cmd_vel)
-            
-        for i in range(hyper_params.number_of_robot):
-            agents[i].cmd_vel_pub.publish(cmd_vel_list[i])
-        rate.sleep()
-
-    zero_vel = Twist()
+        # Publish the velocity to robot
+        cmd_vel = Twist()
+        cmd_vel.linear.x = linear_vel_vector[sample['linear'][0].item()]
+        cmd_vel.angular.z = angular_vel_vector[sample['angular'][0].item()]
+        cmd_vel_list.append(cmd_vel)
+        
     for i in range(hyper_params.number_of_robot):
-        agents[i].cmd_vel_pub.publish(zero_vel)
+        agents[i].cmd_vel_pub.publish(cmd_vel_list[i])
+    rate.sleep()
 
-    # Create accumulative rewards
-    previous_rewards = np.loadtxt(os.path.join(parameter_path, "cumulative_reward.txt"))
-    previous_rewards.reshape((-1, hyper_params.number_of_robot))
-    current_rewards = np.zeros(hyper_params.number_of_robot)
+zero_vel = Twist()
+for i in range(hyper_params.number_of_robot):
+    agents[i].cmd_vel_pub.publish(zero_vel)
 
-    for i in range(hyper_params.number_of_robot):
-        sum_reward = torch.sum(single_buffer_list[i].reward_mini_batch)
-        current_rewards[i] = sum_reward.to('cpu').numpy()
+# Create accumulative rewards
+previous_rewards = np.loadtxt(os.path.join(parameter_path, "cumulative_reward.txt"))
+previous_rewards.reshape((-1, hyper_params.number_of_robot))
+current_rewards = np.zeros(hyper_params.number_of_robot)
 
-    print("Total reward:", current_rewards.sum())
+for i in range(hyper_params.number_of_robot):
+    sum_reward = torch.sum(single_buffer_list[i].reward_mini_batch)
+    current_rewards[i] = sum_reward.to('cpu').numpy()
 
-    total_reward = np.concatenate((previous_rewards, current_rewards.reshape(1, hyper_params.number_of_robot)), axis=0)
-    np.savetxt(os.path.join(parameter_path, "cumulative_reward.txt"), total_reward, fmt='%.2f')
+print("Total reward:", current_rewards.sum())
 
-    # # Estimate the advantage function by using GAE
-    for i in range(hyper_params.number_of_robot):
-        single_buffer_list[i].advantageEstimator(hyper_params.ppo.gamma, hyper_params.ppo.lambda_)
+total_reward = np.concatenate((previous_rewards, current_rewards.reshape(1, hyper_params.number_of_robot)), axis=0)
+np.savetxt(os.path.join(parameter_path, "cumulative_reward.txt"), total_reward, fmt='%.2f')
 
-    # Create buffer from single buffer list
-    buffer = Buffer(single_buffer_list)
-    # Start training
-    kl_divergence_final = 0.0
-    count = 1
-    old_probs = torch.matmul(buffer.linear_probs_batch.reshape(hyper_params.batch_size, 
-                                                        hyper_params.number_of_action, 1),
-                                buffer.angular_probs_batch.reshape(hyper_params.batch_size, 
-                                                        1, hyper_params.number_of_action)).reshape(hyper_params.batch_size,
-                                                                                                    hyper_params.number_of_action**2)
-    for j in range(hyper_params.ppo.E_phi):
-        print("Policy optimizer:" , count)    
-        new_log_prob_batch, new_linear_probs, new_angular_probs = actor.evaluate(buffer.laser_obs_batch, buffer.orient_obs_batch,
-                                                                            buffer.dist_obs_batch, buffer.vel_obs_batch,
-                                                                            buffer.linear_vel_batch, buffer.angular_vel_batch)
-        
-        new_probs = torch.matmul(new_linear_probs.reshape(hyper_params.batch_size, 
-                                                        hyper_params.number_of_action, 1),
-                                new_angular_probs.reshape(hyper_params.batch_size, 
-                                                        1, hyper_params.number_of_action)).reshape(hyper_params.batch_size,
-                                                                                                    hyper_params.number_of_action**2)
-        log_ratio = new_log_prob_batch - buffer.log_prob_batch
-        ratio = log_ratio.exp()
-        
-        kl_div = ((old_probs * (old_probs / new_probs).log()).sum(dim = 1)).mean()
-        kl_divergence_final = kl_div.item()
-        count += 1
-        if (kl_div > 4 * hyper_params.ppo.KL_target): 
-            break
-        
-        loss1 = -buffer.advantage_batch * ratio
-        loss2 = hyper_params.ppo.beta * kl_div
-        loss3 = -hyper_params.ppo.xi * torch.pow(torch.max(torch.zeros(1).to(device), kl_div - 2 * hyper_params.ppo.KL_target), 2)
-        loss = loss1 + loss2 + loss3
-        actor_loss = loss.sum()
-        
-        print("Policy loss:", actor_loss.item())
-        print("kl_divergence:", kl_divergence_final)
-        actor_optimizer.zero_grad()
-        actor_loss.backward()
-        actor_optimizer.step()
-        
+# # Estimate the advantage function by using GAE
+for i in range(hyper_params.number_of_robot):
+    single_buffer_list[i].advantageEstimator(hyper_params.ppo.gamma, hyper_params.ppo.lambda_)
 
-    torch.save(actor.state_dict(), os.path.join(parameter_path, "actor_{}_{}_{}_parameters.pt".format(  hyper_params.setup.num_observations, 
-                                                                                                        hyper_params.setup.num_laser_ray, 
-                                                                                                        hyper_params.number_of_action)))
+# Create buffer from single buffer list
+buffer = Buffer(single_buffer_list)
+# Start training
+kl_divergence_final = 0.0
+for j in range(hyper_params.ppo.E_phi):   
+    actor_loss, kl_divergence_final = calculatePolicyLoss(buffer, actor, hyper_params.ppo, device)
+    if (kl_divergence_final > 4 * hyper_params.ppo.KL_target): 
+        break
+    print("Policy optimizer:" , j + 1) 
+    print("Policy loss:", actor_loss.item())
+    print("kl_divergence:", kl_divergence_final)
+    actor_optimizer.zero_grad()
+    actor_loss.backward()
+    actor_optimizer.step()
 
-    for k in range(hyper_params.ppo.E_v):
-        value_loss = torch.zeros(1).to(device)
-        print("Critic optimizer:", k+1)
-        for single_buffer in single_buffer_list:
-            robot_loss = torch.zeros(1).to(device)
-            # Calculate the value list
-            value_batch = critic.get_value(single_buffer.laser_obs_mini_batch, single_buffer.orient_obs_mini_batch, single_buffer.dist_obs_mini_batch, single_buffer.vel_obs_mini_batch)
-                    
-            for t in range(hyper_params.mini_batch_size):
-                temp_loss = torch.zeros(1).to(device)
-                if t < hyper_params.mini_batch_size:
-                    for t_ in range(t + 1, hyper_params.mini_batch_size):
-                        temp_loss += hyper_params.ppo.gamma**(t_ - t) * single_buffer.reward_mini_batch[t_]
-                robot_loss = robot_loss + (temp_loss - value_batch[t][0])**2
-            value_loss = value_loss + robot_loss
-        
-        # value_loss = - value_loss
+torch.save(actor.state_dict(), 
+            os.path.join(parameter_path, 
+            "actor_{}_{}_{}_parameters.pt".format(hyper_params.setup.num_observations, 
+                                                hyper_params.setup.num_laser_ray, 
+                                                hyper_params.number_of_action)))
 
-        print("Value loss:", value_loss.item())
-        critic_optimizer.zero_grad()
-        value_loss.backward()
-        critic_optimizer.step()
-        
-    torch.save(critic.state_dict(), os.path.join(parameter_path, "critic_{}_{}_parameters.pt".format(hyper_params.setup.num_observations, 
-                                                                                                    hyper_params.setup.num_laser_ray)))
+for k in range(hyper_params.ppo.E_v):
+    value_loss = calculateValueLoss(single_buffer_list, critic, hyper_params.ppo.gamma, device)
+    # value_loss = - value_loss
+    print("Critic optimizer:", k+1)
+    print("Value loss:", value_loss.item())
+    critic_optimizer.zero_grad()
+    value_loss.backward()
+    critic_optimizer.step()
+    
+torch.save(critic.state_dict(), os.path.join(parameter_path, "critic_{}_{}_parameters.pt".format(hyper_params.setup.num_observations, 
+                                                                                                hyper_params.setup.num_laser_ray)))
 
-    if kl_divergence_final > hyper_params.ppo.beta_high * hyper_params.ppo.KL_target:
-        hyper_params.ppo.beta = hyper_params.ppo.alpha * hyper_params.ppo.beta
-    elif kl_divergence_final < hyper_params.ppo.beta_low * hyper_params.ppo.KL_target:
-        hyper_params.ppo.beta = hyper_params.ppo.beta/ hyper_params.ppo.alpha
+if kl_divergence_final > hyper_params.ppo.beta_high * hyper_params.ppo.KL_target:
+    hyper_params.ppo.beta = hyper_params.ppo.alpha * hyper_params.ppo.beta
+elif kl_divergence_final < hyper_params.ppo.beta_low * hyper_params.ppo.KL_target:
+    hyper_params.ppo.beta = hyper_params.ppo.beta/ hyper_params.ppo.alpha
 
-    print("New beta:", hyper_params.ppo.beta)
-    beta_file = open(os.path.join(parameter_path, "beta.txt"), 'w')
-    beta_file.write(str(hyper_params.ppo.beta))
-    beta_file.close()
+print("New beta:", hyper_params.ppo.beta)
+beta_file = open(os.path.join(parameter_path, "beta.txt"), 'w')
+beta_file.write(str(hyper_params.ppo.beta))
+beta_file.close()
 
-    print("KL divergence:", kl_divergence_final)
-    print("Done one update!")
+print("KL divergence:", kl_divergence_final)
+print("Done one update!")

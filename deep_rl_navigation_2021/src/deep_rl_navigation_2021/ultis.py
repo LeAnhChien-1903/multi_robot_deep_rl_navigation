@@ -5,7 +5,7 @@ import numpy as np
 import math
 import torch
 import torch.nn.functional as F
-
+from deep_rl_navigation_2021.actor_critic import *
 
 def normalize_angle(angle: float):
     '''
@@ -41,23 +41,21 @@ def calculatedDistance(point1: np.ndarray, point2: np.ndarray):
     '''
     return math.sqrt(np.sum(np.square(point1 - point2)))
 
-def calculateMultiKLDivergence(p1: torch.Tensor, p2: torch.Tensor, q1: torch.Tensor, q2: torch.Tensor)-> torch.Tensor:
-    # Calculate the probability list
-    p:torch.Tensor = torch.zeros(p1.shape[0] * p2.shape[0])
-    q:torch.Tensor = torch.zeros(q1.shape[0] * q2.shape[0])
-    for i in range(p1.shape[0]):
-        p[i*p1.shape[0]: i*p1.shape[0] + p2.shape[0]] = p1[i] * p2
-        q[i*q1.shape[0]: i*q1.shape[0] + q2.shape[0]] = q1[i] * q2
+def calculateCollisionSpace(width: float, length: float, angle_start: float, angle_end: float, angle_increment: float):
+    angle_thresh = math.atan2(width/2, length/2)
+    angle_range = np.arange(angle_start, angle_end, angle_increment)
+    collision_space = np.zeros(angle_range.shape).astype(np.float32)
+    for i in range(angle_range.shape[0]):
+        if math.pi - angle_thresh <= abs(angle_range[i]) <= math.pi:
+            collision_space[i] = (length + 0.02)/2 / math.cos(math.pi - abs(angle_range[i]))
+        if math.pi/2 <= abs(angle_range[i]) < math.pi - angle_thresh:
+            collision_space[i] = (width + 0.02)/2 / math.cos(abs(angle_range[i]) - math.pi/2)
+        elif angle_thresh <= abs(angle_range[i]) <= math.pi/2:
+            collision_space[i] = (width + 0.02)/2 / math.cos(math.pi/2 - abs(angle_range[i]))
+        else:
+            collision_space[i] = (length + 0.02)/2 / math.cos(abs(angle_range[i]))
 
-    return (p * (p/q).log()).sum()
-
-def calculatePolicyKLDivergence(p1_batch: torch.Tensor, p2_batch: torch.Tensor, q1_batch: torch.Tensor, q2_batch: torch.Tensor) -> torch.Tensor:
-    kl_div = torch.zeros(p1_batch.shape[0])
-    
-    for i in range(p1_batch.shape[0]):
-        kl_div[i] = calculateMultiKLDivergence(p1_batch[i], p2_batch[i], q1_batch[i], q2_batch[i])
-    
-    return kl_div.mean()
+    return collision_space
     
 class Setup:
     def __init__(self):
@@ -260,10 +258,12 @@ class HyperParameters:
 
 
 class Reward:
-    def __init__(self, reward_params: RewardParams, goal_tolerance: float, r_collision: float):
+    def __init__(self, reward_params: RewardParams, r_collision: float, setup: Setup):
         self.params = reward_params
-        self.goal_tolerance = goal_tolerance
+        self.goal_tolerance = setup.goal_tolerance
         self.r_collision = r_collision
+        self.collision_space = calculateCollisionSpace(setup.robot_width, setup.robot_length, 
+                                                        -3*math.pi/4, 3*math.pi/4 + 0.005, math.pi/360)
         self.prev_pose = np.zeros(3, dtype=np.float32)
         self.prev_prev_pose = np.zeros(3, dtype=np.float32)
         self.shortest_path = 0.0
@@ -287,7 +287,7 @@ class Reward:
         # calculate reward when robot reaches goal or collides with other objects
         if curr_dist_to_goal < self.goal_tolerance:
             return self.params.v_goal
-        if laser_data.min() <= self.r_collision:
+        if (laser_data <= self.collision_space).any() == True:
             return self.params.v_collision
         
         # Calculate r_dist
@@ -317,8 +317,8 @@ class Reward:
 
         # Calculate r_mld
         r_mld = 0.0
-        if laser_data.min() < self.r_collision + 0.05:
-            r_mld = -self.params.l_neg * (self.r_collision + 0.05 - laser_data.min())
+        # if laser_data.min() < self.r_collision + 0.05:
+        #     r_mld = -self.params.l_neg * (self.r_collision + 0.05 - laser_data.min())
 
         
         # Calculate r_wig
@@ -437,6 +437,10 @@ class Buffer:
                 self.done_batch = torch.concatenate((self.done_batch, single_buffer_list[i].done_mini_batch))
                 self.advantage_batch = torch.concatenate((self.advantage_batch, single_buffer_list[i].advantage_mini_batch))
 
+            batch_size = self.linear_probs_batch.shape[0]
+            num_of_actions = self.linear_probs_batch.shape[1]
+            self.old_probs = torch.matmul(self.linear_probs_batch.reshape(batch_size, num_of_actions, 1),
+                                        self.angular_probs_batch.reshape(batch_size, 1, num_of_actions)).reshape(batch_size, num_of_actions**2)
 
 def AdvantageFunctionEstimation(reward_batch: torch.Tensor, value_batch: torch.Tensor, done_batch: torch.Tensor, 
                                 gamma: float = 0.99, lambda_: float= 0.95):
@@ -461,3 +465,49 @@ def AdvantageFunctionEstimation(reward_batch: torch.Tensor, value_batch: torch.T
         
     
     return advantage_batch
+
+def calculatePolicyLoss(buffer: Buffer, actor: Actor, ppo: PPO, device):
+    batch_size = buffer.linear_probs_batch.shape[0]
+    num_of_actions = buffer.linear_probs_batch.shape[1]
+    new_log_prob_batch, new_linear_probs, new_angular_probs = actor.evaluate(buffer.laser_obs_batch, buffer.orient_obs_batch,
+                                                                        buffer.dist_obs_batch, buffer.vel_obs_batch,
+                                                                        buffer.linear_vel_batch, buffer.angular_vel_batch)
+    
+    new_probs = torch.matmul(new_linear_probs.reshape(batch_size, num_of_actions, 1),
+                            new_angular_probs.reshape(batch_size, 1, num_of_actions)).reshape(batch_size, num_of_actions**2)
+    log_ratio = new_log_prob_batch - buffer.log_prob_batch
+    ratio = log_ratio.exp()
+    
+    kl_div = ((buffer.old_probs * (buffer.old_probs / new_probs).log()).sum(dim = 1)).mean()
+    kl_divergence_final = kl_div.item()
+    
+    loss1 = -buffer.advantage_batch * ratio
+    loss2 = ppo.beta * kl_div
+    loss3 = -ppo.xi * torch.pow(torch.max(torch.zeros(1).to(device), kl_div - 2 * ppo.KL_target), 2)
+    loss = loss1 + loss2 + loss3
+    actor_loss = loss.sum()
+    
+    return actor_loss, kl_divergence_final
+
+def calculateSingleValueLoss(buffer: SingleBuffer, critic: Critic, gamma:float, device):
+    mini_batch_size = buffer.reward_mini_batch.shape[0]
+    new_value = critic.get_value( buffer.laser_obs_mini_batch, buffer.orient_obs_mini_batch, 
+                                    buffer.dist_obs_mini_batch, buffer.vel_obs_mini_batch)
+    
+    value_loss = torch.zeros(mini_batch_size).to(device)
+    last_reward = 0.0
+    
+    for t in reversed(range(mini_batch_size)):
+        value_loss[t] = (last_reward - new_value[t])**2             
+        last_reward = gamma * (buffer.reward_mini_batch[t] + last_reward)
+    
+    return value_loss.sum()
+
+def calculateValueLoss(buffer_list: list, critic: Critic, gamma: float, device):
+    value_loss = 0.0
+    num_of_robots = len(buffer_list)
+    
+    for i in range(num_of_robots):
+        value_loss += calculateSingleValueLoss(buffer_list[i], critic, gamma, device)
+    
+    return value_loss

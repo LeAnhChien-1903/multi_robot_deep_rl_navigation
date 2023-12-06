@@ -1,0 +1,18 @@
+<launch>
+    <!-- Stage environment -->
+    <include file="$(find multi_robot_environment)/launch/map_plus.launch" />
+
+    <!-- Parameters -->
+    <rosparam command="load" file="$(find deep_rl_navigation_2021)/config/map_plus.yaml"/>
+    
+    <node pkg="tf" type="static_transform_publisher" name="map_to_odom_robot_0" args="1.0 -8.0 0.0 1.570796327 0.0 0.0 map robot_0/odom 20"/>
+    <!-- *************** Map server ****************** -->
+    <node name="map_server" pkg="map_server" type="map_server" args="$(find deep_rl_navigation_2021)/maps/map_plus.yaml" output="screen">
+        <param name="frame_id" value="map"/>
+	</node>
+    <node type="rviz" name="rviz" pkg="rviz" args="-d $(find deep_rl_navigation_2021)/rviz/map_plus.rviz" />
+
+    <!-- Multi robot navigation  -->
+    <node pkg="deep_rl_navigation_2021" type="test_policy_ppo.py" name="deep_rl_navigation" output="screen"/>
+    
+</launch>

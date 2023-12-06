@@ -1,4 +1,4 @@
-image: map_plus.png
+image: empty.png
 resolution: 0.025
 origin: [-10.0, -10.0, 0.0]
 negate: 0
