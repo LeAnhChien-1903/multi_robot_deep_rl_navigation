@@ -22,12 +22,16 @@ class Agent:
     def __init__(self, name: str, hyper_param: HyperParameters):
         self.robot_name = name
         self.setup: Setup = hyper_param.setup
-        self.reward: Reward = Reward()
+        self.reward: Reward = Reward(hyper_param.reward, hyper_param.setup)
         # Initialize observation
         self.observation = Observation(hyper_param.setup.num_observations, hyper_param.setup.num_laser_ray)
         # Robot pose and goal pose
         self.robot_pose = np.zeros(3, dtype=np.float32)
-        self.randomPose()
+        self.setPoseInMapPlus()
+        # Random color
+        self.color = np.array([random.uniform(0.0, 1.0), random.uniform(0.0, 1.0), random.uniform(0.0, 1.0)])
+        self.setColorInMapPlus()
+        # self.randomPose()
         self.current_vel = np.zeros(2, dtype=np.float32)
         # Laser data
         self.laser_data = np.zeros(hyper_param.setup.num_laser_ray, dtype=np.float32)
@@ -36,8 +40,6 @@ class Agent:
         self.laser_scan_sub = rospy.Subscriber(self.robot_name + "/" + hyper_param.setup.laser_scan_topic, LaserScan, self.getLaserData, queue_size= 10)
         self.cmd_vel_pub = rospy.Publisher(self.robot_name + "/" + hyper_param.setup.cmd_vel_topic, Twist, queue_size= 10)
         self.markers_pub = rospy.Publisher(self.robot_name + "/robot_visualization", MarkerArray, queue_size= 10)
-        # Random color
-        self.color = np.array([random.uniform(0.0, 1.0), random.uniform(0.0, 1.0), random.uniform(0.0, 1.0)])
         
         self.path_marker = Marker()
         self.path_marker.header.stamp = rospy.Time.now()
@@ -60,43 +62,48 @@ class Agent:
         self.path_marker.color.b = self.color[2]
         self.path_marker.color.a = 1.0
 
-    def step(self, actor: ActorDiscrete, critic: CriticDiscrete):
+    def step(self, actor: Actor, critic: Critic, device):
         '''
             Timer callback function for implement navigation
         '''
         # Get done
         self.robot_visualization()
         done = self.goalReached()
-        # Calculate the reward at state
-        reward = self.reward.calculateReward(self.laser_data, self.robot_pose, self.goal_pose, self.current_vel, self.setup.robot_radius)
         
         # Get the current state
-        self.observation.setObservation(self.laser_data, self.robot_pose, self.goal_pose, self.current_vel)
-        laser_obs, goal_obs, vel_obs = self.transformObservation()
+        laser_data, goal_data, vel_data = self.observation.setObservation(self.laser_data, self.robot_pose, self.goal_pose, self.current_vel[0], self.current_vel[1])
+        # Calculate the reward at state
+        reward = self.reward.calculateReward(self.laser_data, self.robot_pose, self.goal_pose, self.current_vel)
+        laser_obs = torch.from_numpy(laser_data.reshape((1, self.setup.num_observations, self.setup.num_laser_ray))).to(device)
+        goal_obs = torch.from_numpy(goal_data.reshape(1, 2)).to(device)
+        vel_obs = torch.from_numpy(vel_data.reshape(1, 2)).to(device)
         
         # Get action and value function
-        linear_vel, angular_vel, action_log_prob, linear_probs, angular_probs = actor.get_action(laser_obs, goal_obs, vel_obs)
+        linear_vel, angular_vel, log_prob, vel_probs = actor.get_action(laser_obs, goal_obs, vel_obs)
         value = critic.get_value(laser_obs, goal_obs, vel_obs)
         
         sample: dict = {'laser_obs': laser_obs, 'goal_obs': goal_obs, 'vel_obs': vel_obs,
-                        'linear': linear_vel, 'angular': angular_vel, 'log_prob': action_log_prob, 
-                        'linear_probs': linear_probs, 'angular_probs': angular_probs, 'value': value,
-                        'reward': reward, 'done': done}
+                        'linear': linear_vel, 'angular': angular_vel, 'log_prob': log_prob, 
+                        'vel_probs': vel_probs, 'value': value,'reward': reward, 'done': done}
         return sample
-    def run_policy(self, actor: ActorDiscrete):
+    
+    def run_policy(self, actor: Actor, device):
         self.robot_visualization()
         done = self.goalReached()
-        # Calculate the reward at state
-        reward = self.reward.calculateReward(self.laser_data, self.robot_pose, self.goal_pose, self.current_vel, self.setup.robot_radius)
         
         # Get the current state
-        self.observation.setObservation(self.laser_data, self.robot_pose, self.goal_pose, self.current_vel)
-        laser_obs, goal_obs, vel_obs = self.transformObservation()
+        laser_data, goal_data, vel_data = self.observation.setObservation(self.laser_data, self.robot_pose, self.goal_pose, self.current_vel[0], self.current_vel[1])
+        # Calculate the reward at state
+        reward = self.reward.calculateReward(self.laser_data, self.robot_pose, self.goal_pose)
+        laser_obs = torch.from_numpy(laser_data.reshape((1, self.setup.num_observations, self.setup.num_laser_ray))).to(device)
+        goal_obs = torch.from_numpy(goal_data.reshape(1, 2)).to(device)
+        vel_obs = torch.from_numpy(vel_data.reshape(1, 2)).to(device)
         
         # Get action and value function
-        linear_vel, angular_vel, log_prob = actor.exploit_policy(laser_obs, goal_obs, vel_obs)
+        linear_vel, angular_vel = actor.exploit_policy(laser_obs, goal_obs, vel_obs)
         
-        return linear_vel, angular_vel, log_prob, reward, done
+        return linear_vel, angular_vel, reward, done
+
     def robot_visualization(self):
         visual_markers = MarkerArray()
         robot_marker = Marker()
@@ -161,60 +168,6 @@ class Agent:
         self.path_marker.points.append(p)
         visual_markers.markers.append(self.path_marker)
         
-        # if self.robot_name == "/robot_0":
-        #     wall_marker = Marker()
-        #     wall_marker.header.stamp = rospy.Time.now()
-        #     wall_marker.header.frame_id = "map"
-        #     wall_marker.ns = "wall"
-        #     wall_marker.action = wall_marker.ADD
-        #     wall_marker.type = wall_marker.LINE_STRIP
-            
-        #     wall_marker.pose.orientation.x = 0.0
-        #     wall_marker.pose.orientation.y = 0.0
-        #     wall_marker.pose.orientation.z = 0.0
-        #     wall_marker.pose.orientation.w = 1.0
-        
-        #     wall_marker.scale.x = 0.1
-        #     wall_marker.scale.y = 0.1
-        #     wall_marker.scale.z = 0.1
-            
-        #     wall_marker.color.r = 1.0
-        #     wall_marker.color.g = 0.0
-        #     wall_marker.color.b = 0.0
-        #     wall_marker.color.a = 1.0
-            
-        #     p1 = Point()
-        #     p1.x = -self.setup.map_length / 2
-        #     p1.y = -self.setup.map_width / 2
-        #     p1.z = 0.05
-        #     wall_marker.points.append(p1)
-            
-        #     p2 = Point()
-        #     p2.x = -self.setup.map_length / 2
-        #     p2.y = self.setup.map_width / 2
-        #     p2.z = 0.05
-        #     wall_marker.points.append(p2)
-            
-        #     p3 = Point()
-        #     p3.x = self.setup.map_length / 2
-        #     p3.y = self.setup.map_width / 2
-        #     p3.z = 0.05
-        #     wall_marker.points.append(p3)
-            
-        #     p4 = Point()
-        #     p4.x = self.setup.map_length / 2
-        #     p4.y = -self.setup.map_width / 2
-        #     p4.z = 0.05
-        #     wall_marker.points.append(p4)
-            
-        #     p5 = Point()
-        #     p5.x = -self.setup.map_length / 2
-        #     p5.y = -self.setup.map_width / 2
-        #     p5.z = 0.05
-        #     wall_marker.points.append(p5)
-            
-        #     visual_markers.markers.append(wall_marker)
-        
         self.markers_pub.publish(visual_markers)
         
     def odometryCallback(self, odom: Odometry):
@@ -255,24 +208,6 @@ class Agent:
                 range_x = laser_scan.ranges[i] * math.cos(angle) + self.setup.lidar_x
                 range_y = laser_scan.ranges[i] * math.sin(angle) + self.setup.lidar_y
                 self.laser_data[i] = math.hypot(range_x, range_y)
-        # print(self.robot_name, self.laser_data.flatten())
-    def transformObservation(self):
-        # laser_data = self.observation.laser_data.copy() / 100 # Normalize with 100 is max value
-        # goal_data = self.observation.goal_relation.copy() / 100 # Normalize with 100 is max value
-        # vel_data = self.observation.current_velocity.copy() / 100 # Normal with 100 is max value
-        # observation = np.append(self.observation.laser_data.flatten().copy(), self.observation.goal_relation[0])
-        mean = self.observation.laser_data.mean()
-        std_deviation = self.observation.laser_data.std()
-        # Normalize the observation
-        laser_data = (self.observation.laser_data.copy() - mean) / std_deviation
-        goal_data = np.zeros(2).astype(np.float32)
-        goal_data[0] = self.observation.goal_relation[0]/self.observation.laser_data.max()
-        goal_data[1] = (self.observation.goal_relation[1]/math.pi)
-        
-        laser_obs = torch.from_numpy(laser_data.reshape((1, self.setup.num_observations, self.setup.num_laser_ray)))
-        goal_obs = torch.from_numpy(goal_data)
-        vel_obs = torch.from_numpy(self.observation.current_velocity.copy())
-        return laser_obs, goal_obs, vel_obs
     
     def goalReached(self):
         distance = calculatedDistance(self.robot_pose[0:2], self.goal_pose[0:2])
@@ -282,3 +217,88 @@ class Agent:
     
     def randomPose(self):        
         self.goal_pose = np.array([random.uniform(-self.setup.map_width/2 + 1.0, self.setup.map_width/2 - 1.0), random.uniform(-self.setup.map_length/2 + 1.0, self.setup.map_length/2 - 1.0), random.uniform(-math.pi, math.pi)])
+    
+    def setPoseInMapPlus(self):
+        id = int(self.robot_name.split("_")[1])
+        if id == 0:
+            self.goal_pose = np.array([-13.0, 0.0, math.pi])
+        elif id == 1:
+            self.goal_pose = np.array([-12.36, -4.02, -0.9*math.pi])
+        elif id == 2:
+            self.goal_pose = np.array([-10.52, -7.64, -0.8*math.pi])
+        elif id == 3:
+            self.goal_pose = np.array([-7.64, -10.52, -0.7*math.pi])
+        elif id == 4:
+            self.goal_pose = np.array([-4.02, -12.36, -0.6*math.pi])
+        elif id == 5:
+            self.goal_pose = np.array([0.0, -13.0, -0.5*math.pi])
+        elif id == 6:
+            self.goal_pose = np.array([4.02, -12.36, -0.4*math.pi])
+        elif id == 7:
+            self.goal_pose = np.array([7.64, -10.52, -0.3*math.pi])
+        elif id == 8:
+            self.goal_pose = np.array([10.52, -7.64, -0.2*math.pi])
+        elif id == 9:
+            self.goal_pose = np.array([12.36, -4.02, -0.1*math.pi])
+        elif id == 10:
+            self.goal_pose = np.array([13.0, 0.0, 0.0])
+        elif id == 11:
+            self.goal_pose = np.array([12.36, 4.02, 0.1*math.pi])
+        elif id == 12:
+            self.goal_pose = np.array([10.52, 7.64, 0.2*math.pi])
+        elif id == 13:
+            self.goal_pose = np.array([7.64, 10.52, 0.3*math.pi])
+        elif id == 14:
+            self.goal_pose = np.array([4.02, 12.36, 0.4*math.pi])
+        elif id == 15:
+            self.goal_pose = np.array([0.0, 13.0, 0.5*math.pi])
+        elif id == 16:
+            self.goal_pose = np.array([-4.02, 12.36, 0.6*math.pi])
+        elif id == 17:
+            self.goal_pose = np.array([-7.64, 10.52, 0.7*math.pi])
+        elif id == 18:
+            self.goal_pose = np.array([-10.52, 7.64, 0.8*math.pi])
+        elif id == 19:
+            self.goal_pose = np.array([-12.36, 4.02, 0.9*math.pi])
+    def setColorInMapPlus(self):
+        id = int(self.robot_name.split("_")[1])
+        if id == 0:
+            self.color = np.array([1.0, 0.0, 0.0])
+        elif id == 1:
+            self.color = np.array([0.0, 1.0, 0.0])
+        elif id == 2:
+            self.color = np.array([0.0, 0.0, 1.0])
+        elif id == 3:
+            self.color = np.array([1.0, 1.0, 0.0])
+        elif id == 4:
+            self.color = np.array([1.0, 0.0, 1.0])
+        elif id == 5:
+            self.color = np.array([0.0, 1.0, 1.0])
+        elif id == 6:
+            self.color = np.array([0.0, 0.0, 0.0])
+        elif id == 7:
+            self.color = np.array([0.5, 0.0, 0.0])
+        elif id == 8:
+            self.color = np.array([0.0, 0.5, 0.0])
+        elif id == 9:
+            self.color = np.array([0.0, 0.0, 0.5])
+        elif id == 10:
+            self.color = np.array([0.5, 0.5, 0.0])
+        elif id == 11:
+            self.color = np.array([0.5, 0.0, 0.5])
+        elif id == 12:
+            self.color = np.array([0.0, 0.5, 0.5])
+        elif id == 13:
+            self.color = np.array([0.5, 0.5, 0.5])
+        elif id == 14:
+            self.color = np.array([0.8, 0.0, 0.0])
+        elif id == 15:
+            self.color = np.array([0.0, 0.8, 0.0])
+        elif id == 16:
+            self.color = np.array([0.0, 0.0, 0.8])
+        elif id == 17:
+            self.color = np.array([0.8, 0.8, 0.0])
+        elif id == 18:
+            self.color = np.array([0.8, 0.0, 0.8])
+        elif id == 19:
+            self.color = np.array([0.0, 0.8, 0.8])

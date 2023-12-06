@@ -32,7 +32,7 @@ for i in range(hyper_params.number_of_robot):
 
 
 # Load actor and critic parameters
-actor = ActorDiscrete(num_input_channels= hyper_params.setup.num_observations, num_of_actions= hyper_params.number_of_action)
+actor = Actor(num_input_channels= hyper_params.setup.num_observations, num_of_actions= hyper_params.number_of_action)
 if not os.path.exists(os.path.join(parameter_path, "actor_{}_{}_{}_parameters.pt".format(hyper_params.setup.num_observations, hyper_params.setup.num_laser_ray, hyper_params.number_of_action))):
     torch.save(actor.state_dict(), os.path.join(parameter_path, "actor_{}_{}_{}_parameters.pt".format(hyper_params.setup.num_observations, hyper_params.setup.num_laser_ray, hyper_params.number_of_action)))
     print("Save initialized actor model!")
@@ -41,7 +41,7 @@ else:
     print("Load actor model!")
 
 
-critic = CriticDiscrete(num_input_channels= hyper_params.setup.num_observations)
+critic = Critic(num_input_channels= hyper_params.setup.num_observations)
 if not os.path.exists(os.path.join(parameter_path, "critic_{}_{}_parameters.pt".format(hyper_params.setup.num_observations, hyper_params.setup.num_laser_ray))):
     torch.save(critic.state_dict(), os.path.join(parameter_path, "critic_{}_{}_parameters.pt".format(hyper_params.setup.num_observations, hyper_params.setup.num_laser_ray)))
     print("Save initialized critic model!")

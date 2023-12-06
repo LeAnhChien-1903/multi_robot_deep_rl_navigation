@@ -4,11 +4,32 @@ import rospy
 import numpy as np
 import math
 import torch
+from deep_rl_navigation.actor_critic import *
+
 def normalize_angle(angle: float):
     '''
         Normalizes the angle to -pi to pi 
     '''
     return math.atan2(math.sin(angle), math.cos(angle))
+
+def find_difference_orientation(angle1: float, angle2: float):
+
+    if 0 <= angle1 <= math.pi and 0 <= angle2 <= math.pi:
+        return angle2 - angle1
+    elif -math.pi < angle1 < 0 and -math.pi < angle2 < 0:
+        return angle2 - angle1
+    elif 0 <= angle1 <= math.pi and -math.pi < angle2 < 0:
+        turn = angle2 - angle1
+        if turn < -math.pi:
+            turn += 2 * math.pi
+        return turn
+    elif -math.pi < angle1 < 0 and 0 <= angle2 <= math.pi:
+        turn = angle2 - angle1
+        if turn > math.pi:
+            turn -= 2 * math.pi
+        return turn
+
+    return angle2 - angle1
 
 def calculatedDistance(point1: np.ndarray, point2: np.ndarray):
     '''
@@ -19,15 +40,21 @@ def calculatedDistance(point1: np.ndarray, point2: np.ndarray):
     '''
     return math.sqrt(np.sum(np.square(point1 - point2)))
 
-def calculateMultiKLDivergence(p1: torch.Tensor, p2: torch.Tensor, q1: torch.Tensor, q2: torch.Tensor)-> torch.Tensor:
-    # Calculate the probability list
-    p:torch.Tensor = torch.zeros(p1.shape[0] * p2.shape[0])
-    q:torch.Tensor = torch.zeros(q1.shape[0] * q2.shape[0])
-    for i in range(p1.shape[0]):
-        p[i*p1.shape[0]: i*p1.shape[0] + p2.shape[0]] = p1[i] * p2
-        q[i*q1.shape[0]: i*q1.shape[0] + q2.shape[0]] = q1[i] * q2
+def calculateCollisionSpace(width: float, length: float, angle_start: float, angle_end: float, angle_increment: float):
+    angle_thresh = math.atan2(width/2, length/2)
+    angle_range = np.arange(angle_start, angle_end, angle_increment)
+    collision_space = np.zeros(angle_range.shape).astype(np.float32)
+    for i in range(angle_range.shape[0]):
+        if math.pi - angle_thresh <= abs(angle_range[i]) <= math.pi:
+            collision_space[i] = (length + 0.1)/2 / math.cos(math.pi - abs(angle_range[i]))
+        if math.pi/2 <= abs(angle_range[i]) < math.pi - angle_thresh:
+            collision_space[i] = (width + 0.1)/2 / math.cos(abs(angle_range[i]) - math.pi/2)
+        elif angle_thresh <= abs(angle_range[i]) <= math.pi/2:
+            collision_space[i] = (width + 0.1)/2 / math.cos(math.pi/2 - abs(angle_range[i]))
+        else:
+            collision_space[i] = (length + 0.1)/2 / math.cos(abs(angle_range[i]))
 
-    return (p * (p/q).log()).sum()
+    return collision_space
 class Setup:
     def __init__(self):
         # Time constraint
@@ -41,10 +68,12 @@ class Setup:
         self.max_angular_acceleration: float = 2.0 # Max angular acceleration [rad/s^2]
         self.robot_width: float = 0.6 # Width of robot [m]
         self.robot_length: float = 0.9 # Length of robot [m]
-        self.robot_radius: float = math.hypot(self.robot_width/2, self.robot_length/2) + 0.02 # Radius of robot [m]
+        self.angle_start: float = -3* math.pi/4 # Start angle
+        self.angle_end: float = 3 * math.pi/4 # End angle
+        self.angle_increment: float = math.pi/360 # Increment angle
         self.num_observations: int = 3 # Number of observations
         self.num_laser_ray: int = 541 # Number of layer ray
-        self.goal_tolerance: float = 0.05 # Goal tolerance [m]
+        self.goal_tolerance: float = 0.02 # Goal tolerance [m]
         # Lidar pose
         self.lidar_x: float = 0.0 # lidar position in x direction with base link [m]
         self.lidar_y: float = 0.0 # lidar position in y direction with base link [m]
@@ -58,102 +87,46 @@ class Setup:
         self.cmd_vel_topic = "" # Command velocity topic name
 
 class Observation:
-    def __init__(self, num_observations: int, num_laser_ray: int):
+    def __init__(self, num_observations: int = 3, num_laser_ray: int = 541):
         self.laser_data: np.ndarray = np.zeros((num_observations, num_laser_ray), np.float32) # Matrix of laser data 
-        self.goal_relation: np.ndarray = np.zeros(2, np.float32) # 2D vector representing the goal in polar coordinate (distance and angle) with respect to the robot’s current position.
-        self.current_velocity: np.ndarray = np.zeros(2, np.float32) # he current linear and angular velocity of the differential-driven robot
-
-    def setLaserObservation(self, laser_vec: np.ndarray):
-        '''
-            Set laser scan observation of the robot
-            ### Parameters
-            - laser_vec: Vector of the current laser data
-        '''
+        self.goal_data: np.ndarray = np.zeros(2, np.float32) # 2D vector representing the goal in polar coordinate (distance and angle) with respect to the robot’s current position.
+        self.vel_data: np.ndarray = np.zeros(2, np.float32) # the current linear and angular velocity of the differential-driven robot
+    def setObservation(self, laser_vec: np.ndarray, current_pose: np.ndarray, goal_pose: np.ndarray, linear_vel: float, angular_vel: float):
         # Set the laser data
-        for i in range(self.laser_data.shape[0] - 1, 0, -1):
-            self.laser_data[[i, i - 1]] = self.laser_data[[i-1, i]]
-        for i in range(laser_vec.size):
-            self.laser_data[0, i] = laser_vec[i]
-    def setGoalRelationObservation(self, current_pose: np.ndarray, goal_pose: np.ndarray):
-        '''
-            Set the goal relation observation of the robot
-            ##### Parameters
-            - current_pose: current robot pose [x, y, theta]
-            - goal_pose: goal pose of robot [x, y, theta]
-        '''
-        self.goal_relation[0] = calculatedDistance(goal_pose[0:2], current_pose[0:2])
-        self.goal_relation[1] = math.atan2(goal_pose[1] - current_pose[1], goal_pose[0] - current_pose[0])
-    
-    def setCurrentVelocityObservation(self, linear_velocity: float, angular_velocity: float):
-        '''
-            Set the current velocity observation of the robot
-            ### Parameters
-            - linear_velocity: current linear velocity of the robot
-            - angular_velocity: current angular velocity of the robot
-        '''
-        self.current_velocity[0] = linear_velocity
-        self.current_velocity[1] = angular_velocity
-    def setCurrentVelocityObservation(self, current_vel: np.ndarray):
-        '''
-            Set the current velocity observation of the robot
-            ### Parameters
-            - current_vel: the current velocity of the robot
-        '''
-        self.current_velocity = current_vel.copy()
-    def setObservation(self, laser_vec: np.ndarray, current_pose: np.ndarray, goal_pose: np.ndarray, current_vel: np.ndarray):
-        self.setLaserObservation(laser_vec)
-        self.setGoalRelationObservation(current_pose, goal_pose)
-        self.setCurrentVelocityObservation(current_vel)
-    
-    def normalizeObservation(self):
-        observation = np.concatenate((self.laser_data.flatten(), self.goal_relation))
-        mean = observation.mean()
-        std_deviation = observation.std()
-        
-        self.laser_data = (self.laser_data - mean) / std_deviation
-        self.goal_relation = (self.goal_relation - mean) / std_deviation
-        # velocity_data = (velocity_data - mean) / std_deviation
-
-class Reward:
-    def __init__(self):
-        self.r_arrival: float = 15.0 # reward when robot reach the goal
-        self.r_collision: float = -15.0 # reward when robot colliding with obstacle
-        self.omega_g: float = 2.5 # factor for goal reward
-        self.omega_w: float = - 0.1 # factor for rotational velocity
-        self.large_angular_velocity: float = 0.7 # angular velocity for punish robot
-        self.goal_tolerance: float = 0.1 # tolerance for goal reach
-        self.prev_pose = np.zeros(3, dtype=np.float32)
-    def calculateReward(self, laser_data:np.ndarray, current:np.ndarray, goal: np.ndarray, current_vel: np.ndarray, min_distance: float):
-        '''
-            observation: observation of robot
-            current: current pose of robot
-            goal: goal pose of robot
-            min_distance: minimum distance that robot collides with other objects
-            large_angular_vel: large angular velocity to punish robot
-        '''
-        r_g = r_c = r_w = 0.0 
-        if (self.prev_pose[0] == 0.0 and self.prev_pose[1] == 0.0 and self.prev_pose[2] == 0.0):
-            self.prev_pose = current.copy()
-            return r_g + r_c + r_w
+        flag = False
+        for i in range(self.laser_data.shape[0]):
+            if self.laser_data[i].nonzero()[0].shape[0] == 0:
+                flag = True
+                break
+        if flag == False:
+            self.laser_data = np.roll(self.laser_data, shift=-1, axis=0)
+            self.laser_data[-1] = laser_vec.copy()
         else:
-            # Calculate reward relative to reaching the goal
-            distance_to_goal = calculatedDistance(current[0:2], goal[0:2])
+            for i in range(self.laser_data.shape[0]):
+                self.laser_data[i] = laser_vec.copy()
+        
+        mean = self.laser_data.mean()
+        std = self.laser_data.std()
+        laser_data = (self.laser_data - mean)/ std 
+        # Set the goal data
+        self.goal_data[0] = calculatedDistance(current_pose[0:-1], goal_pose[0:-1]) / 30
+        self.goal_data[1] = math.atan2(goal_pose[1] - current_pose[1], goal_pose[0] - current_pose[0])/ math.pi
+        # Set the current velocity
+        self.vel_data[0] = linear_vel
+        self.vel_data[1] = angular_vel
 
-            if distance_to_goal < self.goal_tolerance:
-                r_g = self.r_arrival
-            else:
-                # Calculate the difference distance between two pose
-                diff_distance = calculatedDistance(self.prev_pose[0:2], goal[0:2]) - distance_to_goal
-                r_g = self.omega_g * diff_distance
-            # Calculate reward relative with collision
-            if min(laser_data) < min_distance:
-                r_c = self.r_collision
-            # Calculate reward relative with large rotational velocities
-            if abs(current_vel[1]) > self.large_angular_velocity:
-                r_w = self.omega_w * abs(current_vel[1])
-            # Update previous robot pose
-            self.prev_pose = current.copy()
-        return r_g + r_c + r_w
+        return laser_data, self.goal_data, self.vel_data
+
+class RewardParams:
+    '''
+        Hyperparameter of reward
+    '''
+    def __init__(self):
+        self.r_arrival: float = 15.0
+        self.r_collision: float = -15.0
+        self.omega_g: float = 2.5
+        self.omega_w: float = -0.1
+        self.large_angular_velocity: float = 0.7
 
 class PPO:
     '''
@@ -165,7 +138,7 @@ class PPO:
         self.T_max: int = 1000
         self.E_phi: int = 20
         self.beta: float = 1.0
-        self.KL_target: float= 0.0015
+        self.kl_target: float= 0.0015
         self.xi: float = 50.0
         self.lr_theta_1st: float = 0.00005
         self.lr_theta_2nd: float = 0.00002
@@ -187,13 +160,14 @@ class Hybrid:
 
 class HyperParameters:
     def __init__(self):
-        self.number_of_robot: int = 5
+        self.number_of_robot: int = 8
         self.number_of_action: int = 21
         self.mini_batch_size: int = 400
-        self.batch_size: int = 4000
+        self.batch_size: int = 3200
         self.setup = Setup() # setup parameters for navigation
         self.ppo = PPO() # ppo parameters for training
         self.hybrid = Hybrid() # hybrid parameters for hybrid control
+        self.reward = RewardParams() # reward parameters for compute reward
         self.initialize()
     
     def initialize(self):
@@ -216,6 +190,9 @@ class HyperParameters:
         self.setup.num_observations = rospy.get_param("/num_observations")
         self.setup.num_laser_ray = rospy.get_param("/num_laser_ray")
         self.setup.goal_tolerance = rospy.get_param("/goal_tolerance")
+        self.setup.angle_start = rospy.get_param("/angle_start")
+        self.setup.angle_end = rospy.get_param("/angle_end")
+        self.setup.angle_increment = rospy.get_param("/angle_increment")
         
         self.setup.robot_length = rospy.get_param("/robot_length")
         self.setup.robot_width = rospy.get_param("/robot_width")
@@ -226,16 +203,19 @@ class HyperParameters:
         
         self.setup.map_length = rospy.get_param("/map_length")
         self.setup.map_width = rospy.get_param("/map_width")
-        
-        self.setup.robot_radius = math.hypot(self.setup.robot_width/2, self.setup.robot_length/2) + 0.02
-
+        # Reward hyperparameters
+        self.reward.r_arrival = rospy.get_param("/reward/r_arrival")
+        self.reward.r_collision = rospy.get_param("/reward/r_collision")
+        self.reward.omega_g = rospy.get_param("/reward/omega_g")
+        self.reward.omega_w = rospy.get_param("/reward/omega_w")
+        self.reward.large_angular_velocity = rospy.get_param("/reward/large_angular_velocity")
         # PPO hyper parameters
         self.ppo.lambda_ = rospy.get_param("/ppo/lambda")
         self.ppo.gamma = rospy.get_param("/ppo/gamma")
         self.ppo.T_max = rospy.get_param("/ppo/T_max")
         self.ppo.E_phi = rospy.get_param("/ppo/E_phi")
         self.ppo.beta = rospy.get_param("/ppo/beta")
-        self.ppo.KL_target = rospy.get_param("/ppo/KL_target")
+        self.ppo.kl_target = rospy.get_param("/ppo/kl_target")
         self.ppo.xi = rospy.get_param("/ppo/xi")
         self.ppo.lr_theta_1st = rospy.get_param("/ppo/lr_theta_1st")
         self.ppo.lr_theta_2nd = rospy.get_param("/ppo/lr_theta_2nd")
@@ -251,25 +231,62 @@ class HyperParameters:
         self.hybrid.v_max = rospy.get_param("/hybrid/v_max")
         
         self.number_of_robot = rospy.get_param("/number_of_robot")
-        self.number_of_action = rospy.get_param("/number_of_action")
         
         self.mini_batch_size = math.ceil(self.ppo.T_max / self.number_of_robot)
         self.batch_size = self.mini_batch_size * self.number_of_robot
+
+class Reward:
+    def __init__(self, reward_params: RewardParams, setup_params: Setup):
+        self.params = reward_params
+        self.goal_tolerance = setup_params.goal_tolerance
+        self.collision_space = calculateCollisionSpace(setup_params.robot_width, setup_params.robot_length,
+                                                        setup_params.angle_start, setup_params.angle_end, 
+                                                        setup_params.angle_increment)
+        self.prev_pose = np.zeros(3, dtype=np.float32)
+    def calculateReward(self, laser_data:np.ndarray, current:np.ndarray, goal: np.ndarray, current_vel: np.ndarray):
+        '''
+            observation: observation of robot
+            current: current pose of robot
+            goal: goal pose of robot
+            r_collision: minimum distance that robot collides with other objects
+            large_angular_vel: large angular velocity to punish robot
+        '''
+        r_g = r_c = r_w = 0.0 
+        if (self.prev_pose[0] == 0.0 and self.prev_pose[1] == 0.0 and self.prev_pose[2] == 0.0):
+            self.prev_pose = current.copy()
+            return 0.0
         
+        curr_dist_to_goal = calculatedDistance(current[0:-1], goal[0:-1])
+        prev_dist_to_goal = calculatedDistance(self.prev_pose[0:-1], goal[0:-1])      
+        
+        if curr_dist_to_goal < self.goal_tolerance:
+            r_g = self.params.r_arrival
+        else:
+            r_g = self.params.omega_g * (prev_dist_to_goal - curr_dist_to_goal)
+            
+        if (laser_data <= self.collision_space).any() == True:
+            r_c = self.params.r_collision
+            
+        if abs(current_vel[1]) > self.params.large_angular_velocity:
+            r_w = self.params.omega_w * abs(current_vel[1])
+
+        self.prev_pose = current.copy()
+        return r_g + r_c + r_w
+
 class SingleBuffer:
-    def __init__(self, mini_batch_size: int, setup: Setup, num_of_actions: int):
-        self.laser_obs_mini_batch = torch.zeros(mini_batch_size, 1, setup.num_observations, setup.num_laser_ray)
-        self.goal_obs_mini_batch = torch.zeros((mini_batch_size, 2))
-        self.vel_obs_mini_batch = torch.zeros((mini_batch_size, 2))
-        self.linear_vel_mini_batch = torch.zeros((mini_batch_size, 1))
-        self.angular_vel_mini_batch= torch.zeros((mini_batch_size, 1))
-        self.linear_probs_mini_batch = torch.zeros((mini_batch_size, num_of_actions))
-        self.angular_probs_mini_batch= torch.zeros((mini_batch_size, num_of_actions))
-        self.done_mini_batch = torch.zeros(mini_batch_size)
-        self.log_prob_mini_batch = torch.zeros(mini_batch_size)
-        self.reward_mini_batch = torch.zeros(mini_batch_size)
-        self.value_mini_batch = torch.zeros(mini_batch_size + 1)
-        self.advantage_mini_batch = torch.zeros(mini_batch_size)
+    def __init__(self, mini_batch_size: int, hyper_params: HyperParameters, device):
+        self.device = device
+        self.laser_obs_mini_batch = torch.zeros(mini_batch_size, hyper_params.setup.num_observations, hyper_params.setup.num_laser_ray).to(device)
+        self.goal_obs_mini_batch = torch.zeros(mini_batch_size, 2).to(device)
+        self.vel_obs_mini_batch = torch.zeros(mini_batch_size, 2).to(device)
+        self.linear_mini_batch = torch.zeros(mini_batch_size).to(device)
+        self.angular_mini_batch = torch.zeros(mini_batch_size).to(device)
+        self.vel_probs_mini_batch = torch.zeros(mini_batch_size, hyper_params.number_of_action**2)
+        self.done_mini_batch = torch.zeros(mini_batch_size).to(device)
+        self.log_prob_mini_batch = torch.zeros(mini_batch_size).to(device)
+        self.reward_mini_batch = torch.zeros(mini_batch_size).to(device)
+        self.value_mini_batch = torch.zeros(mini_batch_size + 1).to(device)
+        self.advantage_mini_batch = torch.zeros(mini_batch_size).to(device)
     
     def update(self, index: int, sample: dict)->None:
         self.value_mini_batch[index] = sample['value']
@@ -277,19 +294,17 @@ class SingleBuffer:
             self.reward_mini_batch[index-1] = sample['reward']
             self.done_mini_batch[index-1] = sample['done']
         if index < self.laser_obs_mini_batch.shape[0]:
+            self.linear_mini_batch[index] = sample['linear']
+            self.angular_mini_batch[index] = sample['angular']
             self.laser_obs_mini_batch[index] = sample['laser_obs']
             self.goal_obs_mini_batch[index] = sample['goal_obs']
             self.vel_obs_mini_batch[index] = sample['vel_obs']
             
-            self.linear_vel_mini_batch[index] = sample['linear']
-            self.angular_vel_mini_batch[index] = sample['angular']
+            self.vel_probs_mini_batch[index] = sample['vel_probs']
             self.log_prob_mini_batch[index] = sample['log_prob']
-            
-            self.linear_probs_mini_batch[index] = sample['linear_probs']
-            self.angular_probs_mini_batch[index] = sample['angular_probs']
     
     def advantageEstimator(self, gamma: float = 0.99, lambda_: float = 0.95):
-        last_advantage = torch.zeros(1)
+        last_advantage = torch.zeros(1).to(self.device)
         last_value = self.value_mini_batch[-1]
         
         for t in reversed(range(self.advantage_mini_batch.shape[0])):
@@ -306,56 +321,86 @@ class SingleBuffer:
             last_value = self.value_mini_batch[t]
 
 class Buffer:
-    def __init__(self, single_buffer_list: list):
+    def __init__(self, single_buffer_list: list, device):
         with torch.no_grad():
             self.laser_obs_batch = single_buffer_list[0].laser_obs_mini_batch
             self.goal_obs_batch = single_buffer_list[0].goal_obs_mini_batch
             self.vel_obs_batch = single_buffer_list[0].vel_obs_mini_batch
-            self.linear_vel_batch = single_buffer_list[0].linear_vel_mini_batch
-            self.linear_probs_batch = single_buffer_list[0].linear_probs_mini_batch
-            self.angular_vel_batch = single_buffer_list[0].angular_vel_mini_batch
-            self.angular_probs_batch = single_buffer_list[0].angular_probs_mini_batch
+            self.linear_batch = single_buffer_list[0].linear_mini_batch
+            self.angular_batch = single_buffer_list[0].angular_mini_batch
+            self.vel_probs_batch = single_buffer_list[0].vel_probs_mini_batch
             self.log_prob_batch = single_buffer_list[0].log_prob_mini_batch
             self.value_batch = single_buffer_list[0].value_mini_batch[0:-1]
-            self.done_batch = single_buffer_list[0].done_mini_batch
             self.reward_batch = single_buffer_list[0].reward_mini_batch
+            self.done_batch = single_buffer_list[0].done_mini_batch
             self.advantage_batch = single_buffer_list[0].advantage_mini_batch
 
             for i in range(1, len(single_buffer_list)):
                 self.laser_obs_batch = torch.concatenate((self.laser_obs_batch, single_buffer_list[i].laser_obs_mini_batch))
                 self.goal_obs_batch = torch.concatenate((self.goal_obs_batch, single_buffer_list[i].goal_obs_mini_batch))
                 self.vel_obs_batch = torch.concatenate((self.vel_obs_batch, single_buffer_list[i].vel_obs_mini_batch))
-                self.linear_vel_batch = torch.concatenate((self.linear_vel_batch, single_buffer_list[i].linear_vel_mini_batch))
-                self.linear_probs_batch = torch.concatenate((self.linear_probs_batch, single_buffer_list[i].linear_probs_mini_batch))
-                self.angular_vel_batch = torch.concatenate((self.angular_vel_batch, single_buffer_list[i].angular_vel_mini_batch))
-                self.angular_probs_batch = torch.concatenate((self.angular_probs_batch, single_buffer_list[i].angular_probs_mini_batch))
+                self.linear_batch = torch.concatenate((self.linear_batch, single_buffer_list[i].linear_mini_batch))
+                self.angular_batch = torch.concatenate((self.angular_batch, single_buffer_list[i].angular_mini_batch))
+                self.vel_probs_batch = torch.concatenate((self.vel_probs_batch, single_buffer_list[i].vel_probs_mini_batch))
                 self.log_prob_batch = torch.concatenate((self.log_prob_batch, single_buffer_list[i].log_prob_mini_batch))
                 self.value_batch = torch.concatenate((self.value_batch, single_buffer_list[i].value_mini_batch[0:-1]))
                 self.reward_batch = torch.concatenate((self.reward_batch, single_buffer_list[i].reward_mini_batch))
                 self.done_batch = torch.concatenate((self.done_batch, single_buffer_list[i].done_mini_batch))
                 self.advantage_batch = torch.concatenate((self.advantage_batch, single_buffer_list[i].advantage_mini_batch))
 
+            self.laser_obs_batch.to(device)
+            self.goal_obs_batch.to(device)
+            self.vel_obs_batch.to(device)
+            self.linear_batch.to(device)
+            self.angular_batch.to(device)
+            self.vel_probs_batch.to(device)
+            self.log_prob_batch.to(device)
+            self.value_batch.to(device)
+            self.reward_batch.to(device)
+            self.done_batch.to(device)
+            self.advantage_batch.to(device)
+            
+def calculatePolicyLoss(buffer: Buffer, actor: Actor, ppo: PPO,  device):
+    new_log_prob_batch, new_vel_probs_batch = actor.evaluate(buffer.laser_obs_batch, 
+                                                            buffer.goal_obs_batch, 
+                                                            buffer.vel_obs_batch,
+                                                            buffer.linear_batch,
+                                                            buffer.angular_batch)
+    
+    log_ratio = new_log_prob_batch - buffer.log_prob_batch
+    ratio = log_ratio.exp()
+    
+    old_vel_probs_batch = buffer.vel_probs_batch.to(device)
+    kl_div = ((old_vel_probs_batch * (old_vel_probs_batch / new_vel_probs_batch).log()).sum(dim = 1)).mean()
+    kl_divergence_final = kl_div.item()
+    
+    loss1 = - buffer.advantage_batch * ratio
+    loss2 = ppo.beta * kl_div
+    loss3 = -  ppo.xi * torch.pow(torch.max(torch.zeros(1).to(device), kl_div - 2 * ppo.kl_target), 2)
+    loss = loss1 + loss2 + loss3
+    actor_loss = loss.sum()
+    
+    return actor_loss, kl_divergence_final
 
-def AdvantageFunctionEstimation(reward_batch: torch.Tensor, value_batch: torch.Tensor, done_batch: torch.Tensor, 
-                                gamma: float = 0.99, lambda_: float= 0.95):
-    batch_size = reward_batch.shape[0]
-    advantage_batch = torch.zeros(batch_size)
+def calculateSingleValueLoss(buffer: SingleBuffer, critic: Critic, gamma:float, device):
+    mini_batch_size = buffer.reward_mini_batch.shape[0]
+    new_value = critic.get_value(buffer.laser_obs_mini_batch, 
+                                buffer.goal_obs_mini_batch, 
+                                buffer.vel_obs_mini_batch)
     
-    last_advantage = torch.zeros(1)
-    last_value = value_batch[-1]
+    value_loss = torch.zeros(mini_batch_size).to(device)
+    last_reward = 0.0
     
-    for t in reversed(range(batch_size)):
-        mask = 1.0 - done_batch[t]
-        last_value = last_value * mask
-        last_advantage = last_advantage * mask
-        
-        delta = reward_batch[t] + gamma * last_value - value_batch[t]
-        
-        last_advantage = delta + gamma * lambda_ * last_advantage
-        
-        advantage_batch[t] = last_advantage
-        
-        last_value = value_batch[t]
-        
+    for t in reversed(range(mini_batch_size)):
+        value_loss[t] = (last_reward - new_value[t])**2             
+        last_reward = gamma * (buffer.reward_mini_batch[t] + last_reward)
+    return value_loss.sum()
+
+def calculateValueLoss(buffer_list: list, critic: Critic, gamma: float, device):
+    value_loss = 0.0
+    num_of_robots = len(buffer_list)
     
-    return advantage_batch
+    for i in range(num_of_robots):
+        value_loss += calculateSingleValueLoss(buffer_list[i], critic, gamma, device)
+    
+    return value_loss
