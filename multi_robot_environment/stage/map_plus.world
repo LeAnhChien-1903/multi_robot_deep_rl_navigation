@@ -22,7 +22,8 @@ window
     scale 20
     show_data 1
     show_grid 1
-    show_footprints 1
+    show_trailarrows 1
+
 )
 floor
 (

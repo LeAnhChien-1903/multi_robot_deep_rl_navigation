@@ -1,0 +1,172 @@
+include "robot.inc"
+include "sick.inc"
+define floor model
+(
+    color "gray30"
+    boundary 1
+    gui_nose 0
+    gui_grid 0
+    gui_outline 0
+    gripper_return 0
+    fiducial_return 0
+    laser_return 1
+)
+resolution 0.025
+interval_sim 100
+
+window
+(
+    size [650.0 650.0]
+    center [0.000000 0.000000]
+    rotate [0.000000 0.000000]
+    scale 20
+    show_data 0
+    show_grid 1
+    show_trailarrows 1
+
+)
+#floor
+#(
+#    name "empty"
+#    bitmap "../maps/empty_20.png"
+#    size [30.000000 30.000000 2.000000]
+#)
+define robot robot_base
+(
+sick_laser(pose [0.400000 0.000000 -0.200000 0.000000])
+)
+robot
+(
+    name 0
+    pose [13.0 0.0 0.0 180.0]
+    color_rgba [1.0 0.0 0.0 1.0]
+)
+robot
+(
+    name 1
+    pose [12.36 4.02 0.0 -162.0]
+    color_rgba [0.0 1.0 0.0 1.0]
+)
+robot
+(
+    name 2
+    pose [10.52 7.64 0.0 -144.0]
+    color_rgba [0.0 0.0 1.0 1.0]
+)
+robot
+(
+    name 3
+    pose [7.64 10.52 0.0 -126.0]
+    color_rgba [1.0 1.0 0.0 1.0]
+)
+robot
+(
+    name 4
+    pose [4.02 12.36 0.0 -108.0]
+    color_rgba [1.0 1.0 0.0 1.0]
+)
+robot
+(
+    name 5
+    pose [0.0 13.0 0.0 -90.0]
+    color_rgba [1.0 0.0 1.0 1.0]
+)
+
+robot
+(
+    name 6
+    pose [-4.02 12.36 0.0 -72.0]
+    color_rgba [0.0 0.0 0.0 1.0]
+)
+robot
+(
+    name 7
+    pose [-7.64 10.52 0.0 -54.0]
+    color_rgba [0.5 0.0 0.0 1.0]
+)
+
+robot
+(
+    name 8
+    pose [-10.52 7.64 0.0 -36.0]
+    color_rgba [0.0 0.5 0.0 1.0]
+)
+
+robot
+(
+    name 9
+    pose [-12.36 4.02 0.0 -18.0]
+    color_rgba [0.0 0.0 0.5 1.0]
+)
+robot
+(
+    name 10
+    pose [-13.0 0.0 0.0 0.0]
+    color_rgba [0.5 0.5 0.0 1.0]
+)
+
+robot
+(
+    name 11
+    pose [-12.36 -4.02 0.0 18.0]
+    color_rgba [0.5 0.0 0.5 1.0]
+)
+
+robot
+(
+    name 12
+    pose [-10.52 -7.64 0.0 36.0]
+    color_rgba [0.0 0.5 0.5 1.0]
+)
+
+robot
+(
+    name 13
+    pose [-7.64 -10.52 0.0 54.0]
+    color_rgba [0.5 0.5 0.5 1.0]
+)
+
+robot
+(
+    name 14
+    pose [-4.02 -12.36 0.0 72.0]
+    color_rgba [0.8 0.0 0.0 1.0]
+)
+
+robot
+(
+    name 15
+    pose [0.0 -13.0 0.0 90.0]
+    color_rgba [0.0 0.8 0.0 1.0]
+)
+
+robot
+(
+    name 16
+    pose [4.02 -12.36 0.0 108.0]
+    color_rgba [0.0 0.0 0.8 1.0]
+)
+
+robot
+(
+    name 17
+    pose [7.64 -10.52 0.0 126.0]
+    color_rgba [0.8 0.8 0.0 1.0]
+)
+
+robot
+(
+    name 18
+    pose [10.52 -7.64 0.0 144.0]
+    color_rgba [0.8 0.0 0.8 1.0]
+)
+
+robot
+(
+    name 19
+    pose [12.36 -4.02 0.0 162.0]
+    color_rgba [0.0 0.8 0.8 1.0]
+)
+
+
+
