@@ -21,6 +21,7 @@ goal_tolerance: 0.1
 angle_start: -2.35619449 # Start angle
 angle_end: 2.35619449 # End angle
 angle_increment: 0.008726646 # Increment angle
+
 reward:
   r_arrival: 15
   r_collision: -15
@@ -31,7 +32,7 @@ reward:
 ppo:
   lambda: 0.95
   gamma: 0.99
-  T_max: 3200
+  T_max: 8000
   E_phi: 20
   beta: 1.0
   kl_target: 0.0015
@@ -50,5 +51,4 @@ hybrid:
   p_scale: 1.25
   v_max: 0.5
 
-number_of_robot: 8
-number_of_action: 21
+number_of_robot: 20
