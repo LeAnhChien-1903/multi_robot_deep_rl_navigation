@@ -20,5 +20,7 @@ catkin_package()
 catkin_install_python(PROGRAMS 
     src/train_policy.py
     src/test_policy.py
+    src/train_policy_ppo.py
+    src/test_policy_ppo.py
     DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
