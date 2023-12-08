@@ -1,6 +1,8 @@
 sample_time: 0.1
 laser_scan_topic: base_scan
 odometry_topic: base_pose_ground_truth
+position_topic: base_pose_ground_truth
+velocity_topic: odom
 cmd_vel_topic: cmd_vel
 min_linear_velocity: 0.0 # m/s
 max_linear_velocity: 1.0 # m/s

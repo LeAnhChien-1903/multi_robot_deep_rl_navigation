@@ -85,6 +85,8 @@ class Setup:
         self.laser_scan_topic = "" # Laser scan topic name
         self.odometry_topic = "" # Odometry topic name
         self.cmd_vel_topic = "" # Command velocity topic name
+        self.position_topic = "" 
+        self.velocity_topic = "" 
 
 class Observation:
     def __init__(self, num_observations: int = 3, num_laser_ray: int = 541):
@@ -180,6 +182,8 @@ class HyperParameters:
         self.setup.laser_scan_topic = rospy.get_param("/laser_scan_topic")
         self.setup.odometry_topic = rospy.get_param("/odometry_topic")
         self.setup.cmd_vel_topic = rospy.get_param("/cmd_vel_topic")
+        self.setup.position_topic = rospy.get_param("/position_topic")
+        self.setup.velocity_topic = rospy.get_param("/velocity_topic")
         
         self.setup.min_linear_velocity = rospy.get_param("/min_linear_velocity")
         self.setup.max_linear_velocity = rospy.get_param("/max_linear_velocity")

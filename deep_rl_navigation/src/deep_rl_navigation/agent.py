@@ -36,7 +36,11 @@ class Agent:
         # Laser data
         self.laser_data = np.zeros(hyper_param.setup.num_laser_ray, dtype=np.float32)
         # Subscriber
-        self.odometry_sub = rospy.Subscriber(self.robot_name + "/" + hyper_param.setup.odometry_topic, Odometry, self.odometryCallback, queue_size= 10)
+        # self.odometry_sub = rospy.Subscriber(self.robot_name + "/" + hyper_param.setup.odometry_topic, Odometry, self.odometryCallback, queue_size= 10)
+        self.position_sub = rospy.Subscriber(self.robot_name + "/" + hyper_param.setup.position_topic, 
+                                            Odometry, self.poseCallback, queue_size= 10)
+        self.vel_sub = rospy.Subscriber(self.robot_name + "/" + hyper_param.setup.velocity_topic, Odometry,
+                                        self.velocityCallback, queue_size= 10)
         self.laser_scan_sub = rospy.Subscriber(self.robot_name + "/" + hyper_param.setup.laser_scan_topic, LaserScan, self.getLaserData, queue_size= 10)
         self.cmd_vel_pub = rospy.Publisher(self.robot_name + "/" + hyper_param.setup.cmd_vel_topic, Twist, queue_size= 10)
         self.markers_pub = rospy.Publisher(self.robot_name + "/robot_visualization", MarkerArray, queue_size= 10)
@@ -94,7 +98,7 @@ class Agent:
         # Get the current state
         laser_data, goal_data, vel_data = self.observation.setObservation(self.laser_data, self.robot_pose, self.goal_pose, self.current_vel[0], self.current_vel[1])
         # Calculate the reward at state
-        reward = self.reward.calculateReward(self.laser_data, self.robot_pose, self.goal_pose)
+        reward = self.reward.calculateReward(self.laser_data, self.robot_pose, self.goal_pose, self.current_vel)
         laser_obs = torch.from_numpy(laser_data.reshape((1, self.setup.num_observations, self.setup.num_laser_ray))).to(device)
         goal_obs = torch.from_numpy(goal_data.reshape(1, 2)).to(device)
         vel_obs = torch.from_numpy(vel_data.reshape(1, 2)).to(device)
@@ -186,6 +190,22 @@ class Agent:
         self.current_vel[0] = odom.twist.twist.linear.x
         self.current_vel[1] = odom.twist.twist.angular.z
     
+    def poseCallback(self, odom: Odometry):
+        # Get current robot pose
+        self.robot_pose[0] = odom.pose.pose.position.x
+        self.robot_pose[1] = odom.pose.pose.position.y
+        
+        rqy = euler_from_quaternion([odom.pose.pose.orientation.x, 
+                                    odom.pose.pose.orientation.y, 
+                                    odom.pose.pose.orientation.z, 
+                                    odom.pose.pose.orientation.w])
+        self.robot_pose[2] = rqy[2]
+    
+    def velocityCallback(self, odom: Odometry):
+        # Get current velocity
+        self.current_vel[0] = odom.twist.twist.linear.x
+        self.current_vel[1] = odom.twist.twist.angular.z
+        
     def getLaserData(self, laser_scan: LaserScan):
         '''
             Get data from lidar 2D
