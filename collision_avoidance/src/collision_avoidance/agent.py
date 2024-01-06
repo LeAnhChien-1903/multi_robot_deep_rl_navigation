@@ -35,15 +35,15 @@ OBS_SIZE = 512
 ACT_SIZE = 2
 LEARNING_RATE = 5e-5
 
-policy_path = "/home/leanhchien/deep_rl_ws/src/multi_robot_deep_rl_navigation/collision_avoidance/parameters"
-# policy = MLPPolicy(obs_size, act_size)
-policy = CNNPolicy(frames=LASER_HIST, action_space=2)
-policy.cuda()
+# policy_path = "/home/leanhchien/deep_rl_ws/src/multi_robot_deep_rl_navigation/collision_avoidance/parameters"
+# # policy = MLPPolicy(obs_size, act_size)
+# policy = CNNPolicy(frames=LASER_HIST, action_space=2)
+# policy.cuda()
 
-file = policy_path + '/stage2.pth'
-print ('############Loading Model###########')
-state_dict = torch.load(file)
-policy.load_state_dict(state_dict)
+# file = policy_path + '/stage2.pth'
+# print ('############Loading Model###########')
+# state_dict = torch.load(file)
+# policy.load_state_dict(state_dict)
 action_bound = [[0, -1], [1, 1]]
 class Agent():
     def __init__(self, beam_num, index, world_name):
@@ -109,35 +109,36 @@ class Agent():
         speed = np.asarray(self.get_self_speed())
         self.state_obs = [self.obs_stack, goal, speed]
         
-        timer = rospy.Timer(rospy.Duration(0.1), self.timerCallback)
+        # timer = rospy.Timer(rospy.Duration(0.1), self.timerCallback)
     
     def timerCallback(self, event):
-        ex = self.goal_point[0] - self.state_GT[0]
-        ey = self.goal_point[1] - self.state_GT[1]
-        if math.hypot(ex, ey) < 0.1:
-            self.control_vel([[0.0, 0.0]])
-        else:
-            laser = np.asarray(self.state_obs[0])
-            goal = np.asarray(self.state_obs[1])
-            speed = np.asarray(self.state_obs[2])
-            laser_obs = Variable(torch.from_numpy(laser.reshape(1, 3, self.beam_num))).float().cuda()
-            goal_obs = Variable(torch.from_numpy(goal.reshape(1, 2))).float().cuda()
-            speed_obs = Variable(torch.from_numpy(speed.reshape(1, 2))).float().cuda()
+        pass
+        # ex = self.goal_point[0] - self.state_GT[0]
+        # ey = self.goal_point[1] - self.state_GT[1]
+        # if math.hypot(ex, ey) < 0.1:
+        #     self.control_vel([[0.0, 0.0]])
+        # else:
+        #     laser = np.asarray(self.state_obs[0])
+        #     goal = np.asarray(self.state_obs[1])
+        #     speed = np.asarray(self.state_obs[2])
+        #     laser_obs = Variable(torch.from_numpy(laser.reshape(1, 3, self.beam_num))).float().cuda()
+        #     goal_obs = Variable(torch.from_numpy(goal.reshape(1, 2))).float().cuda()
+        #     speed_obs = Variable(torch.from_numpy(speed.reshape(1, 2))).float().cuda()
             
-            _, _, _, mean = policy(laser_obs, goal_obs, speed_obs)
-            mean = mean.data.cpu().numpy()
-            scaled_action = np.clip(mean, a_min=action_bound[0], a_max=action_bound[1])
+        #     _, _, _, mean = policy(laser_obs, goal_obs, speed_obs)
+        #     mean = mean.data.cpu().numpy()
+        #     scaled_action = np.clip(mean, a_min=action_bound[0], a_max=action_bound[1])
 
-            self.control_vel(scaled_action)
-            s_next = self.get_laser_observation()
-            left = self.obs_stack.popleft()
-            self.obs_stack.append(s_next)
-            goal_next = np.asarray(self.get_local_goal())
-            speed_next = np.asarray(self.get_self_speed())
-            state_next = [self.obs_stack, goal_next, speed_next]
+        #     self.control_vel(scaled_action)
+        #     s_next = self.get_laser_observation()
+        #     left = self.obs_stack.popleft()
+        #     self.obs_stack.append(s_next)
+        #     goal_next = np.asarray(self.get_local_goal())
+        #     speed_next = np.asarray(self.get_self_speed())
+        #     state_next = [self.obs_stack, goal_next, speed_next]
 
 
-            self.state_obs = state_next
+        #     self.state_obs = state_next
         
     def ground_truth_callback(self, GT_odometry):
         quaternion = GT_odometry.pose.pose.orientation

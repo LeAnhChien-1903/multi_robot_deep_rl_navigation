@@ -19,6 +19,10 @@ catkin_package()
 
 catkin_install_python(PROGRAMS 
   src/train_policy.py
-  src/test_policy.py
+  src/circle_test_5.py
+  src/circle_test_10.py
+  src/circle_test_15.py
+  src/circle_test_20.py
+  src/stage_2_test.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )

@@ -42,18 +42,18 @@ define floor model
 
 floor
 (
-    name "empty"
-    bitmap "../maps/empty.png"
-    size [30.0 30.0 2.00]
+    name "world_1"
+    bitmap "../maps/world_1.png"
+    size [30.25 30.25 2.00]
     pose [0.000 0.000 0.000 0.000]
 )
 
 window
 (
-    size [1920.0 1440.0]
+    size [655.0 655.0]
     center [0.000000 0.000000] # Camera options 
     rotate [0.000000 0.000000] # Camera options 
-    scale 30
+    scale 20
     show_data 1
     show_grid 1
     show_trailarrows 1
@@ -80,23 +80,23 @@ define agent position
         pose [ 0.0 0.0 0.0 0.0 ] 
     )
 )
-agent( pose [13.0 0.0 0.0 -180.0])
-agent( pose [12.36 4.02 0.0 -162.0])
-agent( pose [10.52 7.64 0.0 -144.0])
-agent( pose [7.64 10.52 0.0 -126.0])
-agent( pose [4.02 12.36 0.0 -108.0])
-agent( pose [0.0 13.0 0.0 -90.0])
-agent( pose [-4.02 12.36 0.0 -72.0])
-agent( pose [-7.64 10.52 0.0 -54.0])
-agent( pose [-10.52 7.64 0.0 -36.0])
-agent( pose [-12.36 4.02 0.0 -18.0])
-agent( pose [-13.0 0.0 0.0 0.0])
-agent( pose [-12.36 -4.02 0.0 18.0])
-agent( pose [-10.52 -7.64 0.0 36.0])
-agent( pose [-7.64 -10.52 0.0 54.0])
-agent( pose [-4.02 -12.36 0.0 72.0])
-agent( pose [-0.0 -13.0 0.0 90.0])
-agent( pose [4.02 -12.36 0.0 108.0])
-agent( pose [7.64 -10.52 0.0 126.0])
-agent( pose [10.52 -7.64 0.0 144.0])
-agent( pose [12.36 -4.02 0.0 162.0])
+agent( pose [13.125 2.0 0.0 180])
+agent( pose [13.125 -2.0 0.0 180])
+agent( pose [11.125 2.0 0.0 180])
+agent( pose [11.125 -2.0 0.0 180])
+agent( pose [12.125 0.0 0.0 180])
+agent( pose [-13.125 2.0 0.0 0.0])
+agent( pose [-13.125 -2.0 0.0 0.0])
+agent( pose [-11.125 2.0 0.0 0.0])
+agent( pose [-11.125 -2.0 0.0 0.0])
+agent( pose [-12.125 0.0 0.0 0.0])
+agent( pose [2.0 13.125 0.0 -90])
+agent( pose [-2.0 13.125 0.0 -90])
+agent( pose [2.0 11.125 0.0 -90])
+agent( pose [-2.0 11.125 0.0 -90])
+agent( pose [0.0 12.125 0.0 -90])
+agent( pose [2.0 -13.125 0.0 90])
+agent( pose [-2.0 -13.125 0.0 90])
+agent( pose [2.0 -11.125 0.0 90])
+agent( pose [-2.0 -11.125 0.0 90])
+agent( pose [0.0 -12.125 0.0 90])

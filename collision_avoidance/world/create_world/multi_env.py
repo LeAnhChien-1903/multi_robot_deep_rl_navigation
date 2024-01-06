@@ -6,11 +6,11 @@ world_dir = "collision_avoidance/world"
 launch_dir = "collision_avoidance/launch"
 goal_dir = "collision_avoidance/goal_point"
 pose_dir = "collision_avoidance/init_pose"
-map_name = "empty"
-scale = 15
-map_size = [30.0, 30.0]
+map_name = "multi_env"
+scale = 10
+map_size = [100.0, 80.0]
+window_size = [1050.0, 850.0]
 num_of_robot = 20
-radius = 13
 robot_width = 0.38
 robot_length = 0.44
 robot_height = 0.22
@@ -19,7 +19,7 @@ laser_fov = 180
 laser_samples = 512
 laser_pose = [0.0, 0.0, 0.0, 0.0]
 
-world_file = open(os.path.join(world_dir, "circle_{}.world".format(num_of_robot)), 'w')
+world_file = open(os.path.join(world_dir, "multi_env_{}.world".format(num_of_robot)), 'w')
 
 world_file.write(
 """
@@ -74,7 +74,7 @@ floor
 
 window
 (
-    size [500.0 500.0]
+    size [{} {}]
     center [0.000000 0.000000] # Camera options 
     rotate [0.000000 0.000000] # Camera options 
     scale {}
@@ -105,34 +105,60 @@ define agent position
     )
 )
 """.format(laser_fov, laser_max_range, laser_samples, map_name, map_name, 
-            map_size[0], map_size[1], scale , robot_length, robot_width, robot_height,
-            laser_pose[0], laser_pose[1], laser_pose[2], laser_pose[3]))
+            map_size[0], map_size[1], window_size[0], window_size[1], scale, 
+            robot_length, robot_width, robot_height, laser_pose[0], laser_pose[1], 
+            laser_pose[2], laser_pose[3]))
 
 step = 2 * math.pi / num_of_robot
 goal_point = []
 init_pose = []
-for i in range(num_of_robot):
-    theta = step * i
-    world_file.write("agent( pose [{} {} 0.0 {}])\n".format(round(radius*math.cos(theta), 2), round(radius * math.sin(theta), 2), round((-math.pi + theta) * 180 / math.pi, 2)))
-    goal_point.append([-round(radius*math.cos(theta), 2), -round(radius * math.sin(theta), 2)])
-    init_pose.append([round(radius*math.cos(theta), 2), round(radius * math.sin(theta), 2), (-math.pi + theta)])
+
+world_file.write("agent( pose [{} {} 0.0 {}])\n".format(-31.0, 37.0, -90))
+init_pose.append([-31.0, 37.0, -math.pi/2])
+goal_point.append([-31.0, 5.0])
+world_file.write("agent( pose [{} {} 0.0 {}])\n".format(-31.0, 5.0, 90))
+init_pose.append([-31.0, 5.0, math.pi/2])
+goal_point.append([-31.0, 37.0])
+world_file.write("agent( pose [{} {} 0.0 {}])\n".format(-15.0, 21.0, 180))
+init_pose.append([-15.0, 21.0, math.pi])
+goal_point.append([-47.0, 21.0])
+world_file.write("agent( pose [{} {} 0.0 {}])\n".format(-47.0, 21.0, 0))
+init_pose.append([-47.0, 21.0, 0.0])
+goal_point.append([-15.0, 21.0])
+
+# agent( pose [-6.139 31.382 0.000 -90.000])
+# agent( pose [13.912 5.763 0.000 90.000])
+# agent( pose [13.839 31.433 0.000 180.000])
+# agent( pose [-5.951 6.110 0.000 0.000])
+
+world_file.write("agent( pose [{} {} 0.0 {}])\n".format(-6.0, 31.5, 0.0))
+init_pose.append([-6.0, 31.5, 0.0])
+goal_point.append([14.0, 6.5])
+world_file.write("agent( pose [{} {} 0.0 {}])\n".format(14.0, 31.5, 180))
+init_pose.append([14.0, 31.5, math.pi])
+goal_point.append([-6.0, 6.5])
+world_file.write("agent( pose [{} {} 0.0 {}])\n".format(-6.0, 6.5, 0.0))
+init_pose.append([-6.0, 6.5, 0.0])
+goal_point.append([14.0, 31.5])
+world_file.write("agent( pose [{} {} 0.0 {}])\n".format(14.0, 6.5, 180))
+init_pose.append([14.0, 6.5, math.pi])
+goal_point.append([-6.0, 31.5])
 world_file.close()
 
-np.savetxt(os.path.join(goal_dir, "circle_{}.txt".format(num_of_robot)), np.array(goal_point), fmt= '%.2f')
-np.savetxt(os.path.join(pose_dir, "circle_{}.txt".format(num_of_robot)), np.array(init_pose), fmt= '%.5f')
+np.savetxt(os.path.join(goal_dir, "multi_env_{}.txt".format(num_of_robot)), np.array(goal_point), fmt= '%.2f')
+np.savetxt(os.path.join(pose_dir, "multi_env_{}.txt".format(num_of_robot)), np.array(init_pose), fmt= '%.5f')
 
-
-launch_file =open(os.path.join(launch_dir, "circle_{}.launch".format(num_of_robot)), 'w')
+launch_file =open(os.path.join(launch_dir, "multi_env_{}.launch".format(num_of_robot)), 'w')
 launch_file.write(
 """
 <launch>
 
     <!--  ************** Global Parameters ***************  -->
     <param name="/use_sim_time" value="true"/>
-    <arg name="world_file" default="$(find collision_avoidance)/world/circle_{}.world" />
+    <arg name="world_file" default="$(find collision_avoidance)/world/multi_env_{}.world" />
     <node name="stageros" type="stageros" pkg="stage_ros_add_pose_and_crash" args=" $(arg world_file)"/>
 """.format(num_of_robot))
-for i in range(num_of_robot):
-    launch_file.write('\t<node pkg="collision_avoidance" type="circle_test_{}.py" name="robot_{}" output="screen"/>\n'.format(num_of_robot, i))
+for i in range(8):
+    launch_file.write('\t<node pkg="collision_avoidance" type="test_policy.py" name="robot_{}" output="screen"/>\n'.format(i))
 launch_file.write("</launch>")
 launch_file.close()
